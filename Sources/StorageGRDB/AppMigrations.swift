@@ -13,7 +13,7 @@ public struct AppMigrations {
 
     private enum Spec: Sendable {
         case kvCache(String)
-        case custom(id: String, ifMissing: String?, body: @Sendable (Database) throws -> Void)
+        case custom(id: String, skipIfTableExists: String?, body: @Sendable (Database) throws -> Void)
     }
 
     private var specs: [Spec] = []
@@ -26,13 +26,29 @@ public struct AppMigrations {
         specs.append(.kvCache(tableName)); return self
     }
 
+    /// Add a custom migration
+    /// - Parameters:
+    ///   - id: Unique migration identifier (e.g., "2024-01-15_create_users")
+    ///   - skipIfTableExists: Skip this migration if the specified table already exists
+    ///   - body: Migration body with database access
     @discardableResult
     public mutating func add(
         id: String,
-        ifTableMissing: String? = nil,
+        skipIfTableExists: String? = nil,
         body: @escaping @Sendable (Database) throws -> Void
     ) -> Self {
-        specs.append(.custom(id: id, ifMissing: ifTableMissing, body: body)); return self
+        specs.append(.custom(id: id, skipIfTableExists: skipIfTableExists, body: body)); return self
+    }
+
+    /// Add a custom migration (deprecated parameter name)
+    @available(*, deprecated, renamed: "add(id:skipIfTableExists:body:)")
+    @discardableResult
+    public mutating func add(
+        id: String,
+        ifTableMissing: String?,
+        body: @escaping @Sendable (Database) throws -> Void
+    ) -> Self {
+        specs.append(.custom(id: id, skipIfTableExists: ifTableMissing, body: body)); return self
     }
 
     @discardableResult
@@ -70,10 +86,10 @@ public struct AppMigrations {
                     log?("[AppMigrations] Applied \(id)")
                 }
 
-            case .custom(let id, let ifMissing, let body):
+            case .custom(let id, let skipIfTableExists, let body):
                 let log = options.logger
                 migrator.registerMigration(id) { db in
-                    if let table = ifMissing, try db.tableExists(table) {
+                    if let table = skipIfTableExists, try db.tableExists(table) {
                         log?("[AppMigrations] Skip \(id): table '\(table)' already exists"); return
                     }
                     try body(db); log?("[AppMigrations] Applied \(id)")
