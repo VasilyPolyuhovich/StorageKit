@@ -17,5 +17,9 @@ let package = Package(
                 .product(name: "StorageKit", package: "StorageKit"),
             ]
         ),
+        .testTarget(
+            name: "ContactBookTests",
+            dependencies: ["ContactBook"]
+        ),
     ]
 )
