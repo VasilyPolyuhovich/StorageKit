@@ -1,8 +1,8 @@
 import Foundation
-@preconcurrency import GRDB
-import StorageCore
-import StorageGRDB
-import StorageRepo
+
+// Re-export all modules so users only need `import StorageKit`
+@_exported import StorageKitMacros  // includes @StorageEntity macro + StorageCore + StorageGRDB + GRDB
+@_exported import StorageRepo       // includes GenericRepository, AnyRepository
 
 public enum StorageKit {
 

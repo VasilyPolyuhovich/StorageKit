@@ -32,7 +32,7 @@ final class StorageEntityMacroTests: XCTestCase {
                 var email: String
             }
 
-            public struct UserRecord: StorageKitEntityRecord {
+            public struct UserRecord: StorageKitEntityRecord, Codable {
                 public typealias E = User
                 public static let databaseTableName = "users"
 
@@ -40,6 +40,13 @@ final class StorageEntityMacroTests: XCTestCase {
                 public var name: String
                 public var email: String
                 public var updatedAt: Date
+
+                public init(id: String, name: String, email: String, updatedAt: Date) {
+                    self.id = id;
+                    self.name = name;
+                    self.email = email;
+                    self.updatedAt = updatedAt
+                }
 
                 public func asEntity() -> User {
                     User(id: id, name: name, email: email)
@@ -87,13 +94,19 @@ final class StorageEntityMacroTests: XCTestCase {
                 var title: String
             }
 
-            public struct TaskRecord: StorageKitEntityRecord {
+            public struct TaskRecord: StorageKitEntityRecord, Codable {
                 public typealias E = Task
                 public static let databaseTableName = "tasks"
 
                 public var id: String
                 public var title: String
                 public var updatedAt: Date
+
+                public init(id: String, title: String, updatedAt: Date) {
+                    self.id = id;
+                    self.title = title;
+                    self.updatedAt = updatedAt
+                }
 
                 public func asEntity() -> Task {
                     Task(id: id, title: title)
@@ -126,7 +139,6 @@ final class StorageEntityMacroTests: XCTestCase {
 
     func testStorageEntityRequiresIdProperty() throws {
         #if canImport(StorageKitMacrosPlugin)
-        // When no id property exists, the macro throws error and generates nothing
         assertMacroExpansion(
             """
             @StorageEntity(table: "items")
@@ -173,7 +185,7 @@ final class StorageEntityMacroTests: XCTestCase {
                 var avatar: Data?
             }
 
-            public struct ProfileRecord: StorageKitEntityRecord {
+            public struct ProfileRecord: StorageKitEntityRecord, Codable {
                 public typealias E = Profile
                 public static let databaseTableName = "profiles"
 
@@ -184,6 +196,16 @@ final class StorageEntityMacroTests: XCTestCase {
                 public var createdAt: Date
                 public var avatar: Data?
                 public var updatedAt: Date
+
+                public init(id: String, age: Int, score: Double, isActive: Bool, createdAt: Date, avatar: Data?, updatedAt: Date) {
+                    self.id = id;
+                    self.age = age;
+                    self.score = score;
+                    self.isActive = isActive;
+                    self.createdAt = createdAt;
+                    self.avatar = avatar;
+                    self.updatedAt = updatedAt
+                }
 
                 public func asEntity() -> Profile {
                     Profile(id: id, age: age, score: score, isActive: isActive, createdAt: createdAt, avatar: avatar)
@@ -220,7 +242,6 @@ final class StorageEntityMacroTests: XCTestCase {
 
     func testStorageEntityOptionalSyntax() throws {
         #if canImport(StorageKitMacrosPlugin)
-        // Test that both `T?` and `Optional<T>` syntax work correctly
         assertMacroExpansion(
             """
             @StorageEntity(table: "items")
@@ -237,7 +258,7 @@ final class StorageEntityMacroTests: XCTestCase {
                 var data: Optional<Data>
             }
 
-            public struct ItemRecord: StorageKitEntityRecord {
+            public struct ItemRecord: StorageKitEntityRecord, Codable {
                 public typealias E = Item
                 public static let databaseTableName = "items"
 
@@ -245,6 +266,13 @@ final class StorageEntityMacroTests: XCTestCase {
                 public var name: String?
                 public var data: Optional<Data>
                 public var updatedAt: Date
+
+                public init(id: String, name: String?, data: Optional<Data>, updatedAt: Date) {
+                    self.id = id;
+                    self.name = name;
+                    self.data = data;
+                    self.updatedAt = updatedAt
+                }
 
                 public func asEntity() -> Item {
                     Item(id: id, name: name, data: data)

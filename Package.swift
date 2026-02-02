@@ -34,6 +34,7 @@ let package = Package(
       "StorageCore",
       "StorageGRDB",
       "StorageRepo",
+      "StorageKitMacros",
       .product(name: "GRDB", package: "GRDB.swift")
     ]),
 

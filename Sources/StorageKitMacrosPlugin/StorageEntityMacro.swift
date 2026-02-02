@@ -125,13 +125,26 @@ public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
         // Build createTable column definitions
         let columnDefs = generateColumnDefinitions(properties: properties)
 
+        // Build memberwise initializer parameters
+        let initParams = properties.map { prop in
+            "\(prop.name): \(prop.type)"
+        }.joined(separator: ", ")
+
+        let initAssignments = properties.map { prop in
+            "self.\(prop.name) = \(prop.name)"
+        }.joined(separator: "; ")
+
         let code = """
-        public struct \(recordName): StorageKitEntityRecord {
+        public struct \(recordName): StorageKitEntityRecord, Codable {
             public typealias E = \(entityName)
             public static let databaseTableName = "\(tableName)"
 
             \(propertyDecls)
             public var updatedAt: Date
+
+            public init(\(initParams), updatedAt: Date) {
+                \(initAssignments); self.updatedAt = updatedAt
+            }
 
             public func asEntity() -> \(entityName) {
                 \(entityName)(\(entityInitArgs))
