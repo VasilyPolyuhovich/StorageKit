@@ -48,6 +48,17 @@ final class StorageEntityMacroTests: XCTestCase {
                 public static func from(_ e: User, now: Date) -> Self {
                     Self(id: e.id, name: e.name, email: e.email, updatedAt: now)
                 }
+
+                /// Creates the database table for this record type.
+                /// Call this from your migration: `try UserRecord.createTable(in: db)`
+                public static func createTable(in db: Database) throws {
+                    try db.create(table: databaseTableName) { t in
+                        t.column("id", .text).primaryKey()
+                        t.column("name", .text).notNull()
+                        t.column("email", .text).notNull()
+                        t.column("updatedAt", .datetime).notNull()
+                    }
+                }
             }
 
             extension User: StorageKitEntity {
@@ -91,6 +102,16 @@ final class StorageEntityMacroTests: XCTestCase {
                 public static func from(_ e: Task, now: Date) -> Self {
                     Self(id: e.id, title: e.title, updatedAt: now)
                 }
+
+                /// Creates the database table for this record type.
+                /// Call this from your migration: `try TaskRecord.createTable(in: db)`
+                public static func createTable(in db: Database) throws {
+                    try db.create(table: databaseTableName) { t in
+                        t.column("id", .text).primaryKey()
+                        t.column("title", .text).notNull()
+                        t.column("updatedAt", .datetime).notNull()
+                    }
+                }
             }
 
             extension Task: StorageKitEntity {
@@ -121,6 +142,75 @@ final class StorageEntityMacroTests: XCTestCase {
             diagnostics: [
                 DiagnosticSpec(message: "@StorageEntity requires an 'id' property", line: 1, column: 1)
             ],
+            macros: testMacros
+        )
+        #else
+        throw XCTSkip("macros are only supported when running tests for the host platform")
+        #endif
+    }
+
+    func testStorageEntityColumnTypeMapping() throws {
+        #if canImport(StorageKitMacrosPlugin)
+        assertMacroExpansion(
+            """
+            @StorageEntity(table: "profiles")
+            struct Profile {
+                var id: String
+                var age: Int
+                var score: Double
+                var isActive: Bool
+                var createdAt: Date
+                var avatar: Data?
+            }
+            """,
+            expandedSource: """
+            struct Profile {
+                var id: String
+                var age: Int
+                var score: Double
+                var isActive: Bool
+                var createdAt: Date
+                var avatar: Data?
+            }
+
+            public struct ProfileRecord: StorageKitEntityRecord {
+                public typealias E = Profile
+                public static let databaseTableName = "profiles"
+
+                public var id: String
+                public var age: Int
+                public var score: Double
+                public var isActive: Bool
+                public var createdAt: Date
+                public var avatar: Data?
+                public var updatedAt: Date
+
+                public func asEntity() -> Profile {
+                    Profile(id: id, age: age, score: score, isActive: isActive, createdAt: createdAt, avatar: avatar)
+                }
+
+                public static func from(_ e: Profile, now: Date) -> Self {
+                    Self(id: e.id, age: e.age, score: e.score, isActive: e.isActive, createdAt: e.createdAt, avatar: e.avatar, updatedAt: now)
+                }
+
+                /// Creates the database table for this record type.
+                /// Call this from your migration: `try ProfileRecord.createTable(in: db)`
+                public static func createTable(in db: Database) throws {
+                    try db.create(table: databaseTableName) { t in
+                        t.column("id", .text).primaryKey()
+                        t.column("age", .integer).notNull()
+                        t.column("score", .real).notNull()
+                        t.column("isActive", .boolean).notNull()
+                        t.column("createdAt", .datetime).notNull()
+                        t.column("avatar", .blob)
+                        t.column("updatedAt", .datetime).notNull()
+                    }
+                }
+            }
+
+            extension Profile: StorageKitEntity {
+            }
+            """,
             macros: testMacros
         )
         #else

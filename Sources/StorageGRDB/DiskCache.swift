@@ -13,12 +13,16 @@ struct KVRow: Codable, FetchableRecord, PersistableRecord, Sendable {
 
 public actor DiskCache<Value: Codable & Sendable> {
     public typealias Key = String
+    public typealias ErrorHandler = @Sendable (String, Error) -> Void
+
     private let db: DatabaseActor
     private let cfg: StorageConfig
+    private let onError: ErrorHandler?
 
-    public init(db: DatabaseActor, config: StorageConfig) {
+    public init(db: DatabaseActor, config: StorageConfig, onError: ErrorHandler? = nil) {
         self.db = db
         self.cfg = config
+        self.onError = onError
     }
 
     public func get(_ key: String) async -> Value? {
@@ -35,6 +39,7 @@ public actor DiskCache<Value: Codable & Sendable> {
             let dec = self.cfg.makeDecoder()
             return try dec.decode(Value.self, from: blob)
         } catch {
+            onError?("DiskCache.get(\(key))", error)
             return nil
         }
     }
@@ -51,7 +56,9 @@ public actor DiskCache<Value: Codable & Sendable> {
                 try KVRow(key: key, blob: data, updatedAt: now, expiresAt: expiresAt, size: data.count).save(db)
                 try Self.pruneToQuota(db, maxBytes: quota)
             }
-        } catch { }
+        } catch {
+            onError?("DiskCache.set(\(key))", error)
+        }
     }
 
     public func remove(_ key: String) async { _ = try? await db.write { db in try KVRow.deleteOne(db, key: key) } }

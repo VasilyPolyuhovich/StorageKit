@@ -35,7 +35,7 @@ import StorageKit
 // 1) Define schema
 var schema = AppMigrations()
 schema.addKVCache() // creates "kv_cache" table + indexes if missing
-schema.add(id: "2025-08-28_create_user_profiles", ifTableMissing: "user_profiles") { db in
+schema.add(id: "2025-08-28_create_user_profiles", skipIfTableExists: "user_profiles") { db in
     try db.create(table: "user_profiles") { t in
         t.column("id", .text).primaryKey()
         t.column("name", .text).notNull()
@@ -72,7 +72,7 @@ let ctx = try StorageKit.start(at: url, options: .init(
     )
 )) { m in
     m.addKVCache()
-    m.add(id: "2025-08-28_create_user_profiles", ifTableMissing: "user_profiles") { db in
+    m.add(id: "2025-08-28_create_user_profiles", skipIfTableExists: "user_profiles") { db in
         try db.create(table: "user_profiles") { t in
             t.column("id", .text).primaryKey()
             t.column("name", .text).notNull()
@@ -149,14 +149,14 @@ await cache.removeAll()
 
 ---
 
-## Migrations: `id` and `ifTableMissing`
+## Migrations: `id` and `skipIfTableExists`
 
 - **`id`** — unique migration identifier; GRDB records it so each id runs **exactly once**. Do not rename/reuse a shipped id.
-- **`ifTableMissing`** — guard for **CREATE** migrations. If the table already exists (prebuilt DBs, test fixtures, multi-module setups), the migration body is **skipped** instead of failing. Don’t use this for `ALTER` migrations that must always apply.
+- **`skipIfTableExists`** — guard for **CREATE** migrations. If the table already exists (prebuilt DBs, test fixtures, multi-module setups), the migration body is **skipped** instead of failing. Don’t use this for `ALTER` migrations that must always apply.
 
 **CREATE example (guarded):**
 ```swift
-m.add(id: "2025-09-01_create_events", ifTableMissing: "events") { db in
+m.add(id: "2025-09-01_create_events", skipIfTableExists: "events") { db in
     try db.create(table: "events") { t in
         t.column("id", .text).primaryKey()
         t.column("title", .text).notNull()
@@ -177,7 +177,7 @@ m.add(id: "2025-09-15_add_isArchived_to_events") { db in
 
 ## Troubleshooting (Swift 6)
 
-- **“table already exists”** on CREATE: add `ifTableMissing: "table_name"` for that migration.
+- **“table already exists”** on CREATE: add `skipIfTableExists: "table_name"` for that migration.
 - **Indexes inside `create(table:)`**: not supported; create with `db.create(index: ...)` afterwards.
 
 ---

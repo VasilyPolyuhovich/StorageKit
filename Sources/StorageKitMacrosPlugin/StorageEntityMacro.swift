@@ -122,6 +122,9 @@ public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
             "\(prop.name): e.\(prop.name)"
         }.joined(separator: ", ")
 
+        // Build createTable column definitions
+        let columnDefs = generateColumnDefinitions(properties: properties)
+
         let code = """
         public struct \(recordName): StorageKitEntityRecord {
             public typealias E = \(entityName)
@@ -137,16 +140,68 @@ public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
             public static func from(_ e: \(entityName), now: Date) -> Self {
                 Self(\(recordInitArgs), updatedAt: now)
             }
+
+            /// Creates the database table for this record type.
+            /// Call this from your migration: `try \(recordName).createTable(in: db)`
+            public static func createTable(in db: Database) throws {
+                try db.create(table: databaseTableName) { t in
+        \(columnDefs)
+                    t.column("updatedAt", .datetime).notNull()
+                }
+            }
         }
         """
 
         return DeclSyntax(stringLiteral: code)
+    }
+
+    private static func generateColumnDefinitions(properties: [PropertyInfo]) -> String {
+        properties.map { prop in
+            let notNull = prop.name == "id" || !prop.isOptional
+            let primaryKey = prop.name == "id"
+
+            var def = "            t.column(\"\(prop.name)\", \(prop.columnType))"
+
+            if primaryKey {
+                def += ".primaryKey()"
+            } else if notNull {
+                def += ".notNull()"
+            }
+
+            return def
+        }.joined(separator: "\n")
     }
 }
 
 struct PropertyInfo {
     let name: String
     let type: String
+
+    /// Maps Swift type to GRDB column type string
+    var columnType: String {
+        let baseType = type.replacingOccurrences(of: "?", with: "")
+        switch baseType {
+        case "String", "UUID", "URL":
+            return ".text"
+        case "Int", "Int64", "Int32", "Int16", "Int8", "UInt", "UInt64", "UInt32", "UInt16", "UInt8":
+            return ".integer"
+        case "Double", "Float", "CGFloat":
+            return ".real"
+        case "Bool":
+            return ".boolean"
+        case "Date":
+            return ".datetime"
+        case "Data":
+            return ".blob"
+        default:
+            // For custom types or unknown, assume JSON-encoded text
+            return ".text"
+        }
+    }
+
+    var isOptional: Bool {
+        type.hasSuffix("?")
+    }
 }
 
 enum MacroError: Error, CustomStringConvertible {

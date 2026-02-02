@@ -83,7 +83,7 @@ public enum StorageKit {
         }
     }
 
-    public struct Context {
+    public struct Context: Sendable {
         public let storage: StorageContext
         public let config: StorageConfig
         public let keys: KeyBuilder
@@ -105,6 +105,21 @@ public enum StorageKit {
     }
 
     // MARK: - Simplified Start API
+
+    /// Start StorageKit with zero configuration (uses defaults)
+    /// - Returns: Configured storage context with kv_cache table ready
+    public static func start() throws -> Context {
+        try start(fileName: "app.sqlite")
+    }
+
+    /// Start StorageKit with just a file name
+    /// - Parameter fileName: Database file name (default: "app.sqlite")
+    /// - Returns: Configured storage context with kv_cache table ready
+    public static func start(fileName: String) throws -> Context {
+        try start(fileName: fileName, cacheTTL: .default, diskQuota: .default) { schema in
+            schema.addKVCache()
+        }
+    }
 
     /// Start StorageKit with minimal configuration
     /// - Parameters:

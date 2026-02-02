@@ -55,7 +55,7 @@ public struct GenericRepository<E: StorageKitEntity, R: StorageKitEntityRecord>:
     public func put(_ entity: E) async throws {
         let now = cfg.clock.now
         try await db.write { db in try R.from(entity, now: now).save(db) }
-        let key = makeKey(for: String(describing: entity.id))
+        let key = makeKey(for: "\(entity.id)")
         await ram.set(entity, for: key, ttl: nil)
         await disk.set(entity, for: key, ttl: cfg.defaultTTL)
     }

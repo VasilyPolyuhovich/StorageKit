@@ -23,6 +23,24 @@
 /// - An `updatedAt: Date` property for tracking
 /// - `asEntity()` method to convert back to the entity
 /// - `from(_:now:)` static method to create from entity
+/// - `createTable(in:)` static method for migrations
+///
+/// ## Migrations
+///
+/// The generated Record includes a `createTable(in:)` method for easy migrations:
+/// ```swift
+/// schema.add(id: "2025-01-15_create_users", skipIfTableExists: "users") { db in
+///     try UserRecord.createTable(in: db)
+/// }
+/// ```
+///
+/// Type mappings:
+/// - `String`, `UUID`, `URL` → `.text`
+/// - `Int`, `Int64`, etc. → `.integer`
+/// - `Double`, `Float` → `.real`
+/// - `Bool` → `.boolean`
+/// - `Date` → `.datetime`
+/// - `Data` → `.blob`
 ///
 /// Requirements:
 /// - Must be applied to a struct
