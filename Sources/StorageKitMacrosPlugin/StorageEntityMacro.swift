@@ -20,7 +20,7 @@ public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
             return []
         }
         let properties = extractProperties(from: structDecl)
-        guard properties.contains(where: { $0.name == "id" }) else {
+        guard properties.contains(where: { $0.name == "id" && $0.embedded == nil }) else {
             return []
         }
 
@@ -38,22 +38,107 @@ public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
         return [ext]
     }
 
+    // MARK: - Property Extraction
+
     private static func extractProperties(from structDecl: StructDeclSyntax) -> [PropertyInfo] {
+        // First, extract nested structs for @Embedded type resolution
+        let nestedStructs = extractNestedStructs(from: structDecl)
+
         var properties: [PropertyInfo] = []
         for member in structDecl.memberBlock.members {
             guard let varDecl = member.decl.as(VariableDeclSyntax.self),
                   varDecl.bindingSpecifier.tokenKind == .keyword(.var) else {
                 continue
             }
+
+            // Check for @Embedded attribute
+            let embeddedInfo = extractEmbeddedInfo(from: varDecl.attributes)
+
             for binding in varDecl.bindings {
                 guard let identifier = binding.pattern.as(IdentifierPatternSyntax.self),
                       let typeAnnotation = binding.typeAnnotation else {
                     continue
                 }
-                properties.append(PropertyInfo(name: identifier.identifier.text, type: typeAnnotation.type.trimmedDescription))
+
+                let propName = identifier.identifier.text
+                let typeName = typeAnnotation.type.trimmedDescription
+
+                if let embedded = embeddedInfo {
+                    // This is an @Embedded property - look up nested struct
+                    let prefix = embedded.prefix ?? (propName + "_")
+                    if let nestedStruct = nestedStructs[typeName] {
+                        properties.append(PropertyInfo(
+                            name: propName,
+                            type: typeName,
+                            embedded: EmbeddedPropertyInfo(
+                                prefix: prefix,
+                                nestedProperties: nestedStruct
+                            )
+                        ))
+                    } else {
+                        // Nested struct not found in same declaration - treat as unknown type
+                        // Could emit a warning here in the future
+                        properties.append(PropertyInfo(name: propName, type: typeName, embedded: nil))
+                    }
+                } else {
+                    properties.append(PropertyInfo(name: propName, type: typeName, embedded: nil))
+                }
             }
         }
         return properties
+    }
+
+    /// Extract nested struct declarations and their properties
+    private static func extractNestedStructs(from structDecl: StructDeclSyntax) -> [String: [PropertyInfo]] {
+        var result: [String: [PropertyInfo]] = [:]
+
+        for member in structDecl.memberBlock.members {
+            guard let nestedStruct = member.decl.as(StructDeclSyntax.self) else {
+                continue
+            }
+
+            let structName = nestedStruct.name.text
+            var props: [PropertyInfo] = []
+
+            for nestedMember in nestedStruct.memberBlock.members {
+                guard let varDecl = nestedMember.decl.as(VariableDeclSyntax.self),
+                      varDecl.bindingSpecifier.tokenKind == .keyword(.var) else {
+                    continue
+                }
+
+                for binding in varDecl.bindings {
+                    guard let identifier = binding.pattern.as(IdentifierPatternSyntax.self),
+                          let typeAnnotation = binding.typeAnnotation else {
+                        continue
+                    }
+                    props.append(PropertyInfo(
+                        name: identifier.identifier.text,
+                        type: typeAnnotation.type.trimmedDescription,
+                        embedded: nil
+                    ))
+                }
+            }
+
+            result[structName] = props
+        }
+
+        return result
+    }
+
+    /// Extract @Embedded attribute info from property attributes
+    private static func extractEmbeddedInfo(from attributes: AttributeListSyntax) -> (prefix: String?, found: Bool)? {
+        for attr in attributes {
+            guard let attribute = attr.as(AttributeSyntax.self),
+                  let identifier = attribute.attributeName.as(IdentifierTypeSyntax.self),
+                  identifier.name.text == "Embedded" else {
+                continue
+            }
+
+            // Extract prefix if specified
+            let prefix = EmbeddedMacro.extractPrefix(from: attribute)
+            return (prefix: prefix, found: true)
+        }
+        return nil
     }
 
     // MARK: - PeerMacro (generates companion Record struct)
@@ -73,27 +158,62 @@ public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
         // Extract table name from attribute
         let tableName = extractTableName(from: node) ?? structName.lowercased() + "s"
 
-        // Extract stored properties
+        // Extract stored properties (including embedded info)
         let properties = extractProperties(from: structDecl)
 
         guard !properties.isEmpty else {
             throw MacroError.noProperties
         }
 
-        // Find the id property
-        guard properties.contains(where: { $0.name == "id" }) else {
+        // Find the id property (must not be embedded)
+        guard properties.contains(where: { $0.name == "id" && $0.embedded == nil }) else {
             throw MacroError.noIdProperty
         }
 
-        // Generate record struct using DeclSyntax string interpolation
+        // Flatten properties for Record generation
+        let flattenedProperties = flattenProperties(properties)
+
+        // Generate record struct
         let recordDecl = try generateRecordDecl(
             recordName: recordName,
             entityName: structName,
             tableName: tableName,
-            properties: properties
+            originalProperties: properties,
+            flattenedProperties: flattenedProperties
         )
 
         return [recordDecl]
+    }
+
+    /// Flatten embedded properties into individual columns
+    private static func flattenProperties(_ properties: [PropertyInfo]) -> [FlattenedProperty] {
+        var result: [FlattenedProperty] = []
+
+        for prop in properties {
+            if let embedded = prop.embedded {
+                // Expand embedded property into prefixed columns
+                for nestedProp in embedded.nestedProperties {
+                    result.append(FlattenedProperty(
+                        columnName: embedded.prefix + nestedProp.name,
+                        type: nestedProp.type,
+                        sourcePath: "\(prop.name).\(nestedProp.name)",
+                        embeddedIn: prop.name,
+                        nestedPropertyName: nestedProp.name
+                    ))
+                }
+            } else {
+                // Regular property
+                result.append(FlattenedProperty(
+                    columnName: prop.name,
+                    type: prop.type,
+                    sourcePath: prop.name,
+                    embeddedIn: nil,
+                    nestedPropertyName: nil
+                ))
+            }
+        }
+
+        return result
     }
 
     private static func extractTableName(from node: AttributeSyntax) -> String? {
@@ -115,33 +235,32 @@ public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
         recordName: String,
         entityName: String,
         tableName: String,
-        properties: [PropertyInfo]
+        originalProperties: [PropertyInfo],
+        flattenedProperties: [FlattenedProperty]
     ) throws -> DeclSyntax {
-        // Build property declarations
-        let propertyDecls = properties.map { prop in
-            "public var \(prop.name): \(prop.type)"
+        // Build property declarations (flattened)
+        let propertyDecls = flattenedProperties.map { prop in
+            "public var \(prop.columnName): \(prop.type)"
         }.joined(separator: "\n    ")
 
-        // Build entity initializer arguments
-        let entityInitArgs = properties.map { prop in
-            "\(prop.name): \(prop.name)"
-        }.joined(separator: ", ")
+        // Build entity initializer - reconstruct nested structs
+        let entityInitArgs = generateEntityInitArgs(originalProperties: originalProperties, flattenedProperties: flattenedProperties)
 
-        // Build record initializer arguments from entity
-        let recordInitArgs = properties.map { prop in
-            "\(prop.name): e.\(prop.name)"
+        // Build record initializer arguments from entity - extract from nested structs
+        let recordInitArgs = flattenedProperties.map { prop in
+            "\(prop.columnName): e.\(prop.sourcePath)"
         }.joined(separator: ", ")
 
         // Build createTable column definitions
-        let columnDefs = generateColumnDefinitions(properties: properties)
+        let columnDefs = generateColumnDefinitions(flattenedProperties: flattenedProperties)
 
         // Build memberwise initializer parameters
-        let initParams = properties.map { prop in
-            "\(prop.name): \(prop.type)"
+        let initParams = flattenedProperties.map { prop in
+            "\(prop.columnName): \(prop.type)"
         }.joined(separator: ", ")
 
-        let initAssignments = properties.map { prop in
-            "self.\(prop.name) = \(prop.name)"
+        let initAssignments = flattenedProperties.map { prop in
+            "self.\(prop.columnName) = \(prop.columnName)"
         }.joined(separator: "; ")
 
         let code = """
@@ -178,12 +297,32 @@ public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
         return DeclSyntax(stringLiteral: code)
     }
 
-    private static func generateColumnDefinitions(properties: [PropertyInfo]) -> String {
-        properties.map { prop in
-            let notNull = prop.name == "id" || !prop.isOptional
-            let primaryKey = prop.name == "id"
+    /// Generate entity init arguments, reconstructing nested structs
+    private static func generateEntityInitArgs(
+        originalProperties: [PropertyInfo],
+        flattenedProperties: [FlattenedProperty]
+    ) -> String {
+        originalProperties.map { prop in
+            if let embedded = prop.embedded {
+                // Reconstruct nested struct from flattened columns
+                let nestedArgs = embedded.nestedProperties.map { nestedProp in
+                    let columnName = embedded.prefix + nestedProp.name
+                    return "\(nestedProp.name): \(columnName)"
+                }.joined(separator: ", ")
+                return "\(prop.name): \(prop.type)(\(nestedArgs))"
+            } else {
+                return "\(prop.name): \(prop.name)"
+            }
+        }.joined(separator: ", ")
+    }
 
-            var def = "            t.column(\"\(prop.name)\", \(prop.columnType))"
+    private static func generateColumnDefinitions(flattenedProperties: [FlattenedProperty]) -> String {
+        flattenedProperties.map { prop in
+            let propInfo = PropertyInfo(name: prop.columnName, type: prop.type, embedded: nil)
+            let notNull = prop.columnName == "id" || !propInfo.isOptional
+            let primaryKey = prop.columnName == "id"
+
+            var def = "            t.column(\"\(prop.columnName)\", \(propInfo.columnType))"
 
             if primaryKey {
                 def += ".primaryKey()"
@@ -196,9 +335,18 @@ public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
     }
 }
 
+// MARK: - Supporting Types
+
 struct PropertyInfo {
     let name: String
     let type: String
+    let embedded: EmbeddedPropertyInfo?
+
+    init(name: String, type: String, embedded: EmbeddedPropertyInfo? = nil) {
+        self.name = name
+        self.type = type
+        self.embedded = embedded
+    }
 
     /// Check if type is optional (handles both `T?` and `Optional<T>` syntax)
     var isOptional: Bool {
@@ -238,10 +386,24 @@ struct PropertyInfo {
     }
 }
 
+struct EmbeddedPropertyInfo {
+    let prefix: String
+    let nestedProperties: [PropertyInfo]
+}
+
+struct FlattenedProperty {
+    let columnName: String
+    let type: String
+    let sourcePath: String  // e.g., "address.street" or just "name"
+    let embeddedIn: String?  // Parent property name if embedded
+    let nestedPropertyName: String?  // Property name within nested struct
+}
+
 enum MacroError: Error, CustomStringConvertible {
     case notAStruct
     case noProperties
     case noIdProperty
+    case embeddedTypeNotFound(String)
 
     var description: String {
         switch self {
@@ -251,6 +413,8 @@ enum MacroError: Error, CustomStringConvertible {
             return "@StorageEntity requires at least one stored property"
         case .noIdProperty:
             return "@StorageEntity requires an 'id' property"
+        case .embeddedTypeNotFound(let type):
+            return "@Embedded type '\(type)' must be declared as a nested struct within the same entity"
         }
     }
 }
@@ -259,5 +423,6 @@ enum MacroError: Error, CustomStringConvertible {
 struct StorageKitMacrosPlugin: CompilerPlugin {
     let providingMacros: [Macro.Type] = [
         StorageEntityMacro.self,
+        EmbeddedMacro.self,
     ]
 }

@@ -9,6 +9,7 @@ import StorageKitMacrosPlugin
 
 let testMacros: [String: Macro.Type] = [
     "StorageEntity": StorageEntityMacro.self,
+    "Embedded": EmbeddedMacro.self,
 ]
 #endif
 
@@ -299,6 +300,86 @@ final class StorageEntityMacroTests: XCTestCase {
 
             extension Item: RegisteredEntity {
                 public typealias Record = ItemRecord
+            }
+            """,
+            macros: testMacros
+        )
+        #else
+        throw XCTSkip("macros are only supported when running tests for the host platform")
+        #endif
+    }
+
+    func testStorageEntityWithEmbedded() throws {
+        #if canImport(StorageKitMacrosPlugin)
+        assertMacroExpansion(
+            """
+            @StorageEntity(table: "users")
+            struct User {
+                var id: String
+                var name: String
+
+                struct Address: Embeddable {
+                    var street: String
+                    var city: String
+                }
+
+                @Embedded(prefix: "home_")
+                var homeAddress: Address
+            }
+            """,
+            expandedSource: """
+            struct User {
+                var id: String
+                var name: String
+
+                struct Address: Embeddable {
+                    var street: String
+                    var city: String
+                }
+                var homeAddress: Address
+            }
+
+            public struct UserRecord: StorageKitEntityRecord, Codable {
+                public typealias E = User
+                public static let databaseTableName = "users"
+
+                public var id: String
+                public var name: String
+                public var home_street: String
+                public var home_city: String
+                public var updatedAt: Date
+
+                public init(id: String, name: String, home_street: String, home_city: String, updatedAt: Date) {
+                    self.id = id;
+                    self.name = name;
+                    self.home_street = home_street;
+                    self.home_city = home_city;
+                    self.updatedAt = updatedAt
+                }
+
+                public func asEntity() -> User {
+                    User(id: id, name: name, homeAddress: Address(street: home_street, city: home_city))
+                }
+
+                public static func from(_ e: User, now: Date) -> Self {
+                    Self(id: e.id, name: e.name, home_street: e.homeAddress.street, home_city: e.homeAddress.city, updatedAt: now)
+                }
+
+                /// Creates the database table for this record type.
+                /// Call this from your migration: `try UserRecord.createTable(in: db)`
+                public static func createTable(in db: Database) throws {
+                    try db.create(table: databaseTableName) { t in
+                        t.column("id", .text).primaryKey()
+                        t.column("name", .text).notNull()
+                        t.column("home_street", .text).notNull()
+                        t.column("home_city", .text).notNull()
+                        t.column("updatedAt", .datetime).notNull()
+                    }
+                }
+            }
+
+            extension User: RegisteredEntity {
+                public typealias Record = UserRecord
             }
             """,
             macros: testMacros
