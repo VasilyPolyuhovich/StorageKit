@@ -15,8 +15,9 @@
 /// ```
 ///
 /// This generates:
-/// 1. Conformance to `StorageKitEntity` protocol
+/// 1. Conformance to `RegisteredEntity` protocol (which extends `StorageKitEntity`)
 /// 2. A companion `UserRecord` struct conforming to GRDB's `FetchableRecord` & `PersistableRecord`
+/// 3. A `Record` typealias pointing to the generated Record struct
 ///
 /// The Record struct includes:
 /// - All properties from the original struct
@@ -46,7 +47,7 @@
 /// - Must be applied to a struct
 /// - The struct must have an `id` property (any Hashable & Sendable type)
 /// - All properties must be Codable and Sendable
-@attached(extension, conformances: StorageKitEntity)
+@attached(extension, conformances: RegisteredEntity, names: named(Record))
 @attached(peer, names: suffixed(Record))
 public macro StorageEntity(table: String? = nil) = #externalMacro(
     module: "StorageKitMacrosPlugin",

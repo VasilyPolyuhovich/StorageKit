@@ -68,7 +68,8 @@ final class StorageEntityMacroTests: XCTestCase {
                 }
             }
 
-            extension User: StorageKitEntity {
+            extension User: RegisteredEntity {
+                public typealias Record = UserRecord
             }
             """,
             macros: testMacros
@@ -127,7 +128,8 @@ final class StorageEntityMacroTests: XCTestCase {
                 }
             }
 
-            extension Task: StorageKitEntity {
+            extension Task: RegisteredEntity {
+                public typealias Record = TaskRecord
             }
             """,
             macros: testMacros
@@ -230,7 +232,8 @@ final class StorageEntityMacroTests: XCTestCase {
                 }
             }
 
-            extension Profile: StorageKitEntity {
+            extension Profile: RegisteredEntity {
+                public typealias Record = ProfileRecord
             }
             """,
             macros: testMacros
@@ -294,7 +297,8 @@ final class StorageEntityMacroTests: XCTestCase {
                 }
             }
 
-            extension Item: StorageKitEntity {
+            extension Item: RegisteredEntity {
+                public typealias Record = ItemRecord
             }
             """,
             macros: testMacros

@@ -6,7 +6,7 @@ import SwiftCompilerPlugin
 /// Macro that generates StorageKitEntity conformance + companion Record struct.
 public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
 
-    // MARK: - ExtensionMacro (adds StorageKitEntity conformance)
+    // MARK: - ExtensionMacro (adds RegisteredEntity conformance with Record typealias)
 
     public static func expansion(
         of node: AttributeSyntax,
@@ -24,7 +24,17 @@ public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
             return []
         }
 
-        let ext = try ExtensionDeclSyntax("extension \(type.trimmed): StorageKitEntity {}")
+        let structName = structDecl.name.text
+        let recordName = "\(structName)Record"
+
+        // Generate extension with RegisteredEntity conformance and Record typealias
+        let ext = try ExtensionDeclSyntax(
+            """
+            extension \(type.trimmed): RegisteredEntity {
+                public typealias Record = \(raw: recordName)
+            }
+            """
+        )
         return [ext]
     }
 

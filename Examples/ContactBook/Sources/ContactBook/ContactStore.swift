@@ -21,11 +21,7 @@ public final class ContactStore {
 
     private func startObserving() {
         observationTask = Task {
-            let stream = await AppStorage.storage.observeAll(
-                Contact.self,
-                record: ContactRecord.self,
-                orderBy: "name"
-            )
+            let stream = await AppStorage.storage.observeAll(Contact.self, orderBy: "name")
             for await updatedContacts in stream {
                 self.contacts = updatedContacts
             }
@@ -33,7 +29,7 @@ public final class ContactStore {
     }
 
     private func addSampleDataIfNeeded() async {
-        let count = try? await AppStorage.storage.count(Contact.self, record: ContactRecord.self)
+        let count = try? await AppStorage.storage.count(Contact.self)
         guard count == 0 else { return }
 
         let samples = [
@@ -42,7 +38,7 @@ public final class ContactStore {
             Contact(name: "Bob Wilson", phone: "+1 555-9999", email: "bob@example.com"),
         ]
         for contact in samples {
-            try? await AppStorage.storage.save(contact, record: ContactRecord.self)
+            try? await AppStorage.storage.save(contact)
         }
     }
 
@@ -50,19 +46,19 @@ public final class ContactStore {
 
     public func add(_ contact: Contact) {
         Task {
-            try? await AppStorage.storage.save(contact, record: ContactRecord.self)
+            try? await AppStorage.storage.save(contact)
         }
     }
 
     public func update(_ contact: Contact) {
         Task {
-            try? await AppStorage.storage.save(contact, record: ContactRecord.self)
+            try? await AppStorage.storage.save(contact)
         }
     }
 
     public func delete(id: String) {
         Task {
-            try? await AppStorage.storage.delete(Contact.self, id: id, record: ContactRecord.self)
+            try? await AppStorage.storage.delete(Contact.self, id: id)
         }
     }
 

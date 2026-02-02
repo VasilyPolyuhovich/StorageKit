@@ -18,11 +18,11 @@ struct ContactStorageTests {
             email: "test@example.com"
         )
 
-        // Save
-        try await storage.save(contact, record: ContactRecord.self)
+        // Save (no record: parameter needed!)
+        try await storage.save(contact)
 
         // Fetch by ID
-        let fetched: Contact? = try await storage.get(Contact.self, id: contact.id, record: ContactRecord.self)
+        let fetched: Contact? = try await storage.get(Contact.self, id: contact.id)
         #expect(fetched != nil)
         #expect(fetched?.name == "Test User")
         #expect(fetched?.phone == "+1 555-0000")
@@ -31,23 +31,23 @@ struct ContactStorageTests {
         // Update
         var updated = contact
         updated.name = "Updated User"
-        try await storage.save(updated, record: ContactRecord.self)
+        try await storage.save(updated)
 
-        let refetched: Contact? = try await storage.get(Contact.self, id: contact.id, record: ContactRecord.self)
+        let refetched: Contact? = try await storage.get(Contact.self, id: contact.id)
         #expect(refetched?.name == "Updated User")
 
         // Count
-        let count = try await storage.count(Contact.self, record: ContactRecord.self)
+        let count = try await storage.count(Contact.self)
         #expect(count == 1)
 
         // Delete
-        try await storage.delete(Contact.self, id: contact.id, record: ContactRecord.self)
+        try await storage.delete(Contact.self, id: contact.id)
 
-        let deleted: Contact? = try await storage.get(Contact.self, id: contact.id, record: ContactRecord.self)
+        let deleted: Contact? = try await storage.get(Contact.self, id: contact.id)
         #expect(deleted == nil)
 
         // Count after delete
-        let finalCount = try await storage.count(Contact.self, record: ContactRecord.self)
+        let finalCount = try await storage.count(Contact.self)
         #expect(finalCount == 0)
     }
 
@@ -64,11 +64,11 @@ struct ContactStorageTests {
         ]
 
         for contact in contacts {
-            try await storage.save(contact, record: ContactRecord.self)
+            try await storage.save(contact)
         }
 
         // Fetch all
-        let allContacts: [Contact] = try await storage.all(Contact.self, record: ContactRecord.self, orderBy: "name")
+        let allContacts: [Contact] = try await storage.all(Contact.self, orderBy: "name")
         #expect(allContacts.count == 3)
         #expect(allContacts[0].name == "Alice")
         #expect(allContacts[1].name == "Bob")

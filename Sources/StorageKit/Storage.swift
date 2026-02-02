@@ -8,24 +8,35 @@ import StorageRepo
 ///
 /// For caching, use `MemoryCache` or `DiskCache` separately as needed.
 ///
-/// Usage:
+/// Usage with @StorageEntity macro (recommended - no record: parameter needed):
 /// ```swift
-/// let ctx = try StorageKit.start()
+/// @StorageEntity
+/// struct User {
+///     var id: String
+///     var name: String
+/// }
+///
+/// let ctx = try StorageKit.start(...)
 /// let storage = ctx.facade
 ///
 /// // Save
-/// try await storage.save(user, record: UserRecord.self)
+/// try await storage.save(user)
 ///
 /// // Get
-/// let user = try await storage.get(User.self, id: "1", record: UserRecord.self)
+/// let user = try await storage.get(User.self, id: "1")
 ///
 /// // Delete
-/// try await storage.delete(User.self, id: "1", record: UserRecord.self)
+/// try await storage.delete(User.self, id: "1")
 ///
 /// // Observe changes
-/// for await users in await storage.observeAll(User.self, record: UserRecord.self) {
+/// for await users in await storage.observeAll(User.self) {
 ///     print("Users updated: \(users.count)")
 /// }
+/// ```
+///
+/// Legacy usage (explicit record: parameter):
+/// ```swift
+/// try await storage.save(user, record: UserRecord.self)
 /// ```
 public final class Storage: Sendable {
     private let context: StorageKit.Context
@@ -172,6 +183,104 @@ public final class Storage: Sendable {
         record: R.Type
     ) -> AnyRepository<E> where R.E == E {
         context.repository(type, record: R.self)
+    }
+}
+
+// MARK: - Simplified API (no record: parameter needed)
+
+extension Storage {
+
+    // MARK: - Save (Simplified)
+
+    /// Save an entity (infers Record type from RegisteredEntity conformance)
+    public func save<E: RegisteredEntity>(_ entity: E) async throws {
+        try await save(entity, record: E.Record.self)
+    }
+
+    /// Save multiple entities (infers Record type from RegisteredEntity conformance)
+    public func save<E: RegisteredEntity>(_ entities: [E]) async throws {
+        try await save(entities, record: E.Record.self)
+    }
+
+    // MARK: - Get (Simplified)
+
+    /// Get an entity by ID (infers Record type from RegisteredEntity conformance)
+    public func get<E: RegisteredEntity>(_ type: E.Type, id: String) async throws -> E? {
+        try await get(type, id: id, record: E.Record.self)
+    }
+
+    /// Get all entities (infers Record type from RegisteredEntity conformance)
+    public func all<E: RegisteredEntity>(
+        _ type: E.Type,
+        orderBy: String? = nil,
+        ascending: Bool = true
+    ) async throws -> [E] {
+        try await all(type, record: E.Record.self, orderBy: orderBy, ascending: ascending)
+    }
+
+    /// Get entities with pagination (infers Record type from RegisteredEntity conformance)
+    public func page<E: RegisteredEntity>(
+        _ type: E.Type,
+        orderBy: String? = nil,
+        ascending: Bool = true,
+        limit: Int,
+        offset: Int = 0
+    ) async throws -> RepoPage<E> {
+        try await page(type, record: E.Record.self, orderBy: orderBy, ascending: ascending, limit: limit, offset: offset)
+    }
+
+    /// Count all entities (infers Record type from RegisteredEntity conformance)
+    public func count<E: RegisteredEntity>(_ type: E.Type) async throws -> Int {
+        try await count(type, record: E.Record.self)
+    }
+
+    // MARK: - Delete (Simplified)
+
+    /// Delete an entity by ID (infers Record type from RegisteredEntity conformance)
+    public func delete<E: RegisteredEntity>(_ type: E.Type, id: String) async throws {
+        try await delete(type, id: id, record: E.Record.self)
+    }
+
+    /// Delete an entity (infers Record type from RegisteredEntity conformance)
+    public func delete<E: RegisteredEntity>(_ entity: E) async throws {
+        try await delete(entity, record: E.Record.self)
+    }
+
+    // MARK: - Observe (Simplified)
+
+    /// Observe a single entity by ID (infers Record type from RegisteredEntity conformance)
+    public func observe<E: RegisteredEntity>(_ type: E.Type, id: String) async -> AsyncStream<E?> {
+        await observe(type, id: id, record: E.Record.self)
+    }
+
+    /// Observe all entities (infers Record type from RegisteredEntity conformance)
+    public func observeAll<E: RegisteredEntity>(
+        _ type: E.Type,
+        orderBy: String? = nil,
+        ascending: Bool = true
+    ) async -> AsyncStream<[E]> {
+        await observeAll(type, record: E.Record.self, orderBy: orderBy, ascending: ascending)
+    }
+
+    /// Observe all entities with deduplication (infers Record type from RegisteredEntity conformance)
+    public func observeAllDistinct<E: RegisteredEntity & Equatable>(
+        _ type: E.Type,
+        orderBy: String? = nil,
+        ascending: Bool = true
+    ) async -> AsyncStream<[E]> {
+        await observeAllDistinct(type, record: E.Record.self, orderBy: orderBy, ascending: ascending)
+    }
+
+    // MARK: - Repository (Simplified)
+
+    /// Get a typed repository (infers Record type from RegisteredEntity conformance)
+    public func repository<E: RegisteredEntity>(_ type: E.Type) -> GenericRepository<E, E.Record> {
+        context.makeRepository(type, record: E.Record.self)
+    }
+
+    /// Get a type-erased repository (infers Record type from RegisteredEntity conformance)
+    public func anyRepository<E: RegisteredEntity>(_ type: E.Type) -> AnyRepository<E> {
+        context.repository(type, record: E.Record.self)
     }
 }
 
