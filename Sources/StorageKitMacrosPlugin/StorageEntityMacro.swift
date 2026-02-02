@@ -177,9 +177,24 @@ struct PropertyInfo {
     let name: String
     let type: String
 
+    /// Check if type is optional (handles both `T?` and `Optional<T>` syntax)
+    var isOptional: Bool {
+        type.hasSuffix("?") || type.hasPrefix("Optional<")
+    }
+
+    /// Extract base type without optional wrapper
+    var baseType: String {
+        if type.hasSuffix("?") {
+            return String(type.dropLast())
+        }
+        if type.hasPrefix("Optional<") && type.hasSuffix(">") {
+            return String(type.dropFirst(9).dropLast())
+        }
+        return type
+    }
+
     /// Maps Swift type to GRDB column type string
     var columnType: String {
-        let baseType = type.replacingOccurrences(of: "?", with: "")
         switch baseType {
         case "String", "UUID", "URL":
             return ".text"
@@ -197,10 +212,6 @@ struct PropertyInfo {
             // For custom types or unknown, assume JSON-encoded text
             return ".text"
         }
-    }
-
-    var isOptional: Bool {
-        type.hasSuffix("?")
     }
 }
 

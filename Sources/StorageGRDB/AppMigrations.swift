@@ -1,5 +1,6 @@
 import Foundation
 @preconcurrency import GRDB
+import StorageCore
 
 public struct AppMigrations {
     public struct Options: Sendable {
@@ -96,7 +97,13 @@ public struct AppMigrations {
                 }
             }
         }
-        try migrator.migrate(writer)
+        do {
+            try migrator.migrate(writer)
+        } catch {
+            // Extract migration ID from error if possible
+            let migrationId = (error as NSError).userInfo["migrationIdentifier"] as? String ?? "unknown"
+            throw StorageError.migrationFailed(id: migrationId, underlying: error)
+        }
     }
 
     private static func indexExists(_ name: String, in db: Database) throws -> Bool {

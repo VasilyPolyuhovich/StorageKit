@@ -3,18 +3,6 @@ import Foundation
 import StorageCore
 import StorageGRDB
 
-/// Error thrown when QueryIndexStore encounters invalid configuration
-public enum QueryIndexStoreError: Error, Sendable {
-    case invalidTableName(String)
-
-    public var localizedDescription: String {
-        switch self {
-        case .invalidTableName(let name):
-            return "Invalid table name: '\(name)'. Use only letters, numbers, and underscores."
-        }
-    }
-}
-
 public actor QueryIndexStore: Sendable {
     public struct Item: Codable, Sendable, Equatable {
         public let id: String
@@ -29,10 +17,10 @@ public actor QueryIndexStore: Sendable {
     /// - Parameters:
     ///   - db: Database actor for operations
     ///   - tableName: Table name (must be alphanumeric with underscores only)
-    /// - Throws: QueryIndexStoreError.invalidTableName if table name contains invalid characters
+    /// - Throws: StorageError.invalidTableName if table name contains invalid characters
     public init(db: DatabaseActor, tableName: String = "query_index") throws {
         guard Self.isValidTableName(tableName) else {
-            throw QueryIndexStoreError.invalidTableName(tableName)
+            throw StorageError.invalidTableName(tableName)
         }
         self.db = db
         self.table = tableName

@@ -217,4 +217,62 @@ final class StorageEntityMacroTests: XCTestCase {
         throw XCTSkip("macros are only supported when running tests for the host platform")
         #endif
     }
+
+    func testStorageEntityOptionalSyntax() throws {
+        #if canImport(StorageKitMacrosPlugin)
+        // Test that both `T?` and `Optional<T>` syntax work correctly
+        assertMacroExpansion(
+            """
+            @StorageEntity(table: "items")
+            struct Item {
+                var id: String
+                var name: String?
+                var data: Optional<Data>
+            }
+            """,
+            expandedSource: """
+            struct Item {
+                var id: String
+                var name: String?
+                var data: Optional<Data>
+            }
+
+            public struct ItemRecord: StorageKitEntityRecord {
+                public typealias E = Item
+                public static let databaseTableName = "items"
+
+                public var id: String
+                public var name: String?
+                public var data: Optional<Data>
+                public var updatedAt: Date
+
+                public func asEntity() -> Item {
+                    Item(id: id, name: name, data: data)
+                }
+
+                public static func from(_ e: Item, now: Date) -> Self {
+                    Self(id: e.id, name: e.name, data: e.data, updatedAt: now)
+                }
+
+                /// Creates the database table for this record type.
+                /// Call this from your migration: `try ItemRecord.createTable(in: db)`
+                public static func createTable(in db: Database) throws {
+                    try db.create(table: databaseTableName) { t in
+                        t.column("id", .text).primaryKey()
+                        t.column("name", .text)
+                        t.column("data", .blob)
+                        t.column("updatedAt", .datetime).notNull()
+                    }
+                }
+            }
+
+            extension Item: StorageKitEntity {
+            }
+            """,
+            macros: testMacros
+        )
+        #else
+        throw XCTSkip("macros are only supported when running tests for the host platform")
+        #endif
+    }
 }
