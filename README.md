@@ -20,7 +20,7 @@ A cohesive storage layer for SwiftUI apps with:
 
 - **StorageCore** — foundational pieces (Clock, `StorageConfig` with encoder/decoder *factories*, `KeyBuilder`, `MemoryCache`)
 - **StorageGRDB** — GRDB integration (`DatabaseActor`, `StorageContext`, `DiskCache`, `AppMigrations`, `ObservationBridge`)
-- **StorageRepo** — `GenericRepository` (read-through/write-through), `QueryIndexStore`
+- **StorageRepo** — `GenericRepository` (SQLite CRUD), `QueryIndexStore`, pagination
 - **StorageKit** — **unified facade** (this is what you import in your app)
 
 > Internally, GRDB-facing files use `@preconcurrency import GRDB` and `StorageContext` is marked `@unchecked Sendable` because it stores GRDB types (`DatabasePool`) that are thread-safe but not annotated `Sendable` in public API. This keeps code sound under Swift 6 while preserving correctness.
@@ -107,18 +107,23 @@ If you need the raw, immediate stream (no main-actor hop), use `DatabaseActor.st
 
 ---
 
-## Repositories — read-through/write-through
+## Repositories — Simple SQLite CRUD
 
-**Get** tries RAM → Disk → DB (and fills caches on the way).  
-**Put** writes to DB, then updates Disk and RAM (write-through).
+`GenericRepository` provides direct SQLite access without caching layers.
+For caching, use `MemoryCache` or `DiskCache` separately as needed.
 
 ```swift
-// Get (local-first with TTL)
-let profile = try await userRepo.get(id: "u1", policy: .localFirst(ttl: 300))
+// Get from database
+let profile = try await userRepo.get(id: "u1")
 
-// Put (write-through)
+// Save to database
 if let p = profile {
     try await userRepo.put(p)
+}
+
+// Observe changes (MainActor delivery)
+for await profiles in await userRepo.observeAll() {
+    print("Profiles updated: \(profiles.count)")
 }
 ```
 

@@ -4,7 +4,9 @@ import StorageCore
 import StorageGRDB
 import StorageRepo
 
-/// Simplified storage facade with convenient CRUD operations
+/// Simplified storage facade with convenient CRUD operations backed by SQLite.
+///
+/// For caching, use `MemoryCache` or `DiskCache` separately as needed.
 ///
 /// Usage:
 /// ```swift
@@ -20,7 +22,7 @@ import StorageRepo
 /// // Delete
 /// try await storage.delete(User.self, id: "1", record: UserRecord.self)
 ///
-/// // Observe
+/// // Observe changes
 /// for await users in await storage.observeAll(User.self, record: UserRecord.self) {
 ///     print("Users updated: \(users.count)")
 /// }
@@ -57,24 +59,14 @@ public final class Storage: Sendable {
 
     // MARK: - Get
 
-    /// Get an entity by ID (uses local-first caching)
+    /// Get an entity by ID from database
     public func get<E: StorageKitEntity, R: StorageKitEntityRecord>(
         _ type: E.Type,
         id: String,
         record: R.Type
     ) async throws -> E? where R.E == E {
         let repo = context.makeRepository(type, record: R.self)
-        return try await repo.get(id: id, policy: .localFirst(ttl: nil))
-    }
-
-    /// Get an entity by ID, bypassing cache (always reads from database)
-    public func getFresh<E: StorageKitEntity, R: StorageKitEntityRecord>(
-        _ type: E.Type,
-        id: String,
-        record: R.Type
-    ) async throws -> E? where R.E == E {
-        let repo = context.makeRepository(type, record: R.self)
-        return try await repo.get(id: id, policy: .databaseOnly)
+        return try await repo.get(id: id)
     }
 
     /// Get all entities

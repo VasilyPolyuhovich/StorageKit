@@ -93,9 +93,7 @@ public enum StorageKit {
         }
 
         public func makeRepository<E: StorageKitEntity, R: StorageKitEntityRecord>(_: E.Type, record _: R.Type) -> GenericRepository<E, R> where R.E == E {
-            let ram = MemoryCache<String, E>(capacity: 1000, defaultTTL: config.defaultTTL, clock: config.clock)
-            let disk = DiskCache<E>(db: storage.dbActor, config: config)
-            return GenericRepository<E, R>(db: storage.dbActor, ram: ram, disk: disk, keys: keys, config: config)
+            GenericRepository<E, R>(db: storage.dbActor, keys: keys, config: config)
         }
 
         /// Type-erased repository for easier DI

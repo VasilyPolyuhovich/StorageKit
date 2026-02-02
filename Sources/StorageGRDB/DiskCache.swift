@@ -61,13 +61,30 @@ public actor DiskCache<Value: Codable & Sendable> {
         }
     }
 
-    public func remove(_ key: String) async { _ = try? await db.write { db in try KVRow.deleteOne(db, key: key) } }
-    public func removeAll() async { _ = try? await db.write { db in try KVRow.deleteAll(db) } }
+    public func remove(_ key: String) async {
+        do {
+            _ = try await db.write { db in try KVRow.deleteOne(db, key: key) }
+        } catch {
+            onError?("DiskCache.remove(\(key))", error)
+        }
+    }
+
+    public func removeAll() async {
+        do {
+            _ = try await db.write { db in try KVRow.deleteAll(db) }
+        } catch {
+            onError?("DiskCache.removeAll()", error)
+        }
+    }
 
     public func pruneExpired() async {
         let now = self.cfg.clock.now
-        _ = try? await db.write { db in
-            try db.execute(sql: "DELETE FROM kv_cache WHERE expiresAt IS NOT NULL AND expiresAt < ?", arguments: [now])
+        do {
+            try await db.write { db in
+                try db.execute(sql: "DELETE FROM kv_cache WHERE expiresAt IS NOT NULL AND expiresAt < ?", arguments: [now])
+            }
+        } catch {
+            onError?("DiskCache.pruneExpired()", error)
         }
     }
 
