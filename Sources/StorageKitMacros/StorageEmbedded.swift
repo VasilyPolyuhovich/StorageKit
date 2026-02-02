@@ -16,11 +16,11 @@
 /// struct User {
 ///     var id: String
 ///
-///     @Embedded(prefix: "home_")
+///     @StorageEmbedded(prefix: "home_")
 ///     var homeAddress: Address
 ///     // Generates columns: home_street, home_city
 ///
-///     @Embedded  // Uses "workAddress_" as prefix
+///     @StorageEmbedded  // Uses "workAddress_" as prefix
 ///     var workAddress: Address
 ///     // Generates columns: workAddress_street, workAddress_city
 /// }
@@ -37,11 +37,11 @@
 /// - Properties that need to be queryable
 ///
 /// When NOT to use:
-/// - Entities with their own ID (use `@HasMany`/`@BelongsTo` instead)
+/// - Entities with their own ID (use `@StorageHasMany`/`@StorageBelongsTo` instead)
 /// - Large nested structures (consider separate table)
 /// - Data shared between multiple parents
 @attached(peer)
-public macro Embedded(prefix: String? = nil) = #externalMacro(
+public macro StorageEmbedded(prefix: String? = nil) = #externalMacro(
     module: "StorageKitMacrosPlugin",
-    type: "EmbeddedMacro"
+    type: "StorageEmbeddedMacro"
 )

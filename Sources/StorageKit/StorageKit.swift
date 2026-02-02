@@ -31,58 +31,6 @@ public enum StorageKit {
         public static let `default`: DiskQuota = .megabytes(30)
     }
 
-    // MARK: - Legacy Configuration (deprecated)
-
-    @available(*, deprecated, message: "Use simplified start() API instead")
-    public struct PoolOptions: Sendable {
-        public enum PragmasPlacement: Sendable { case append, prepend }
-        public enum Preset: Sendable { case `default`, custom([String]) }
-
-        public var preset: Preset
-        public var pragmasPlacement: PragmasPlacement
-        public var configure: (@Sendable (inout Configuration) -> Void)?
-
-        public init(
-            preset: Preset = .default,
-            pragmasPlacement: PragmasPlacement = .append,
-            configure: (@Sendable (inout Configuration) -> Void)? = nil
-        ) {
-            self.preset = preset
-            self.pragmasPlacement = pragmasPlacement
-            self.configure = configure
-        }
-
-        public var pragmas: [String] {
-            switch preset {
-            case .default: return ["PRAGMA foreign_keys = ON", "PRAGMA journal_mode = WAL"]
-            case .custom(let list): return list
-            }
-        }
-    }
-
-    @available(*, deprecated, message: "Use simplified start() API instead")
-    public struct Options: Sendable {
-        public var fileName: String
-        public var namespace: String
-        public var defaultTTL: TimeInterval
-        public var diskQuotaBytes: Int
-        public var pool: PoolOptions
-
-        public init(
-            fileName: String = "app.sqlite",
-            namespace: String = "app",
-            defaultTTL: TimeInterval = 300,
-            diskQuotaBytes: Int = 30 * 1024 * 1024,
-            pool: PoolOptions = .init()
-        ) {
-            self.fileName = fileName
-            self.namespace = namespace
-            self.defaultTTL = defaultTTL
-            self.diskQuotaBytes = diskQuotaBytes
-            self.pool = pool
-        }
-    }
-
     public struct Context: Sendable {
         public let storage: StorageContext
         public let config: StorageConfig
@@ -170,54 +118,9 @@ public enum StorageKit {
         return try DatabasePool(path: url.path, configuration: cfg)
     }
 
-    // MARK: - Legacy Start API (deprecated)
-
-    @available(*, deprecated, message: "Use start(fileName:cacheTTL:diskQuota:migrations:) instead")
-    public static func start(_ options: Options = .init(), migrationsBuilder: (inout AppMigrations) -> Void) throws -> Context {
-        let url = try defaultDatabaseURL(fileName: options.fileName)
-        return try start(at: url, options: options, migrationsBuilder: migrationsBuilder)
-    }
-
-    @available(*, deprecated, message: "Use start(at:cacheTTL:diskQuota:migrations:) instead")
-    public static func start(at url: URL, options: Options = .init(), migrationsBuilder: (inout AppMigrations) -> Void) throws -> Context {
-        var schema = AppMigrations()
-        migrationsBuilder(&schema)
-
-        let pool = try makePool(at: url, options: options.pool)
-        try schema.run(on: pool)
-
-        let storage = StorageContext(pool: pool, dbActor: DatabaseActor(pool: pool))
-        let config = StorageConfig(defaultTTL: options.defaultTTL, diskQuotaBytes: options.diskQuotaBytes, clock: SystemClock(), namespace: options.namespace)
-        let keys = KeyBuilder(namespace: config.namespace)
-        return Context(storage: storage, config: config, keys: keys)
-    }
-
-    @available(*, deprecated, message: "Internal API - will be removed in future versions")
-    public static func makePool(at url: URL, options: PoolOptions = .init()) throws -> DatabasePool {
-        var cfg = Configuration()
-        switch options.pragmasPlacement {
-        case .prepend:
-            let pragmas = options.pragmas
-            if !pragmas.isEmpty {
-                cfg.prepareDatabase { db in
-                    for sql in pragmas { try db.execute(sql: sql) }
-                }
-            }
-            if let hook = options.configure { hook(&cfg) }
-        case .append:
-            if let hook = options.configure { hook(&cfg) }
-            let pragmas = options.pragmas
-            if !pragmas.isEmpty {
-                cfg.prepareDatabase { db in
-                    for sql in pragmas { try db.execute(sql: sql) }
-                }
-            }
-        }
-        return try DatabasePool(path: url.path, configuration: cfg)
-    }
-
     public static func defaultDatabaseURL(fileName: String = "app.sqlite") throws -> URL {
         let base = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         return base.appendingPathComponent(fileName)
     }
+
 }

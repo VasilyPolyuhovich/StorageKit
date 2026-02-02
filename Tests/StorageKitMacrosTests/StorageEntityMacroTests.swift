@@ -9,7 +9,10 @@ import StorageKitMacrosPlugin
 
 let testMacros: [String: Macro.Type] = [
     "StorageEntity": StorageEntityMacro.self,
-    "Embedded": EmbeddedMacro.self,
+    "StorageEmbedded": StorageEmbeddedMacro.self,
+    "StorageHasMany": StorageHasManyMacro.self,
+    "StorageBelongsTo": StorageBelongsToMacro.self,
+    "StorageJSON": StorageJSONMacro.self,
 ]
 #endif
 
@@ -55,6 +58,16 @@ final class StorageEntityMacroTests: XCTestCase {
 
                 public static func from(_ e: User, now: Date) -> Self {
                     Self(id: e.id, name: e.name, email: e.email, updatedAt: now)
+                }
+
+                /// Schema columns for auto-migration
+                public static var schemaColumns: [ColumnSchema] {
+                    [
+                        ColumnSchema(name: "id", type: "TEXT", notNull: true, primaryKey: true, defaultValue: nil),
+                        ColumnSchema(name: "name", type: "TEXT", notNull: true, primaryKey: false, defaultValue: nil),
+                        ColumnSchema(name: "email", type: "TEXT", notNull: true, primaryKey: false, defaultValue: nil),
+                        ColumnSchema(name: "updatedAt", type: "DATETIME", notNull: true, primaryKey: false, defaultValue: nil)
+                    ]
                 }
 
                 /// Creates the database table for this record type.
@@ -116,6 +129,15 @@ final class StorageEntityMacroTests: XCTestCase {
 
                 public static func from(_ e: Task, now: Date) -> Self {
                     Self(id: e.id, title: e.title, updatedAt: now)
+                }
+
+                /// Schema columns for auto-migration
+                public static var schemaColumns: [ColumnSchema] {
+                    [
+                        ColumnSchema(name: "id", type: "TEXT", notNull: true, primaryKey: true, defaultValue: nil),
+                        ColumnSchema(name: "title", type: "TEXT", notNull: true, primaryKey: false, defaultValue: nil),
+                        ColumnSchema(name: "updatedAt", type: "DATETIME", notNull: true, primaryKey: false, defaultValue: nil)
+                    ]
                 }
 
                 /// Creates the database table for this record type.
@@ -218,6 +240,19 @@ final class StorageEntityMacroTests: XCTestCase {
                     Self(id: e.id, age: e.age, score: e.score, isActive: e.isActive, createdAt: e.createdAt, avatar: e.avatar, updatedAt: now)
                 }
 
+                /// Schema columns for auto-migration
+                public static var schemaColumns: [ColumnSchema] {
+                    [
+                        ColumnSchema(name: "id", type: "TEXT", notNull: true, primaryKey: true, defaultValue: nil),
+                        ColumnSchema(name: "age", type: "INTEGER", notNull: true, primaryKey: false, defaultValue: nil),
+                        ColumnSchema(name: "score", type: "REAL", notNull: true, primaryKey: false, defaultValue: nil),
+                        ColumnSchema(name: "isActive", type: "BOOLEAN", notNull: true, primaryKey: false, defaultValue: nil),
+                        ColumnSchema(name: "createdAt", type: "DATETIME", notNull: true, primaryKey: false, defaultValue: nil),
+                        ColumnSchema(name: "avatar", type: "BLOB", notNull: false, primaryKey: false, defaultValue: nil),
+                        ColumnSchema(name: "updatedAt", type: "DATETIME", notNull: true, primaryKey: false, defaultValue: nil)
+                    ]
+                }
+
                 /// Creates the database table for this record type.
                 /// Call this from your migration: `try ProfileRecord.createTable(in: db)`
                 public static func createTable(in db: Database) throws {
@@ -286,6 +321,16 @@ final class StorageEntityMacroTests: XCTestCase {
                     Self(id: e.id, name: e.name, data: e.data, updatedAt: now)
                 }
 
+                /// Schema columns for auto-migration
+                public static var schemaColumns: [ColumnSchema] {
+                    [
+                        ColumnSchema(name: "id", type: "TEXT", notNull: true, primaryKey: true, defaultValue: nil),
+                        ColumnSchema(name: "name", type: "TEXT", notNull: false, primaryKey: false, defaultValue: nil),
+                        ColumnSchema(name: "data", type: "BLOB", notNull: false, primaryKey: false, defaultValue: nil),
+                        ColumnSchema(name: "updatedAt", type: "DATETIME", notNull: true, primaryKey: false, defaultValue: nil)
+                    ]
+                }
+
                 /// Creates the database table for this record type.
                 /// Call this from your migration: `try ItemRecord.createTable(in: db)`
                 public static func createTable(in db: Database) throws {
@@ -323,7 +368,7 @@ final class StorageEntityMacroTests: XCTestCase {
                     var city: String
                 }
 
-                @Embedded(prefix: "home_")
+                @StorageEmbedded(prefix: "home_")
                 var homeAddress: Address
             }
             """,
@@ -365,6 +410,17 @@ final class StorageEntityMacroTests: XCTestCase {
                     Self(id: e.id, name: e.name, home_street: e.homeAddress.street, home_city: e.homeAddress.city, updatedAt: now)
                 }
 
+                /// Schema columns for auto-migration
+                public static var schemaColumns: [ColumnSchema] {
+                    [
+                        ColumnSchema(name: "id", type: "TEXT", notNull: true, primaryKey: true, defaultValue: nil),
+                        ColumnSchema(name: "name", type: "TEXT", notNull: true, primaryKey: false, defaultValue: nil),
+                        ColumnSchema(name: "home_street", type: "TEXT", notNull: true, primaryKey: false, defaultValue: nil),
+                        ColumnSchema(name: "home_city", type: "TEXT", notNull: true, primaryKey: false, defaultValue: nil),
+                        ColumnSchema(name: "updatedAt", type: "DATETIME", notNull: true, primaryKey: false, defaultValue: nil)
+                    ]
+                }
+
                 /// Creates the database table for this record type.
                 /// Call this from your migration: `try UserRecord.createTable(in: db)`
                 public static func createTable(in db: Database) throws {
@@ -380,6 +436,168 @@ final class StorageEntityMacroTests: XCTestCase {
 
             extension User: RegisteredEntity {
                 public typealias Record = UserRecord
+            }
+            """,
+            macros: testMacros
+        )
+        #else
+        throw XCTSkip("macros are only supported when running tests for the host platform")
+        #endif
+    }
+
+    func testStorageEntityWithRelations() throws {
+        #if canImport(StorageKitMacrosPlugin)
+        // Test that @StorageHasMany and @StorageBelongsTo properties are skipped in Record generation
+        assertMacroExpansion(
+            """
+            @StorageEntity(table: "posts")
+            struct Post {
+                var id: String
+                var title: String
+                var authorId: String
+
+                @StorageBelongsTo
+                var author: User?
+
+                @StorageHasMany(foreignKey: "postId")
+                var comments: [Comment]
+            }
+            """,
+            expandedSource: """
+            struct Post {
+                var id: String
+                var title: String
+                var authorId: String
+                var author: User?
+                var comments: [Comment]
+            }
+
+            public struct PostRecord: StorageKitEntityRecord, Codable {
+                public typealias E = Post
+                public static let databaseTableName = "posts"
+
+                public var id: String
+                public var title: String
+                public var authorId: String
+                public var updatedAt: Date
+
+                public init(id: String, title: String, authorId: String, updatedAt: Date) {
+                    self.id = id;
+                    self.title = title;
+                    self.authorId = authorId;
+                    self.updatedAt = updatedAt
+                }
+
+                public func asEntity() -> Post {
+                    Post(id: id, title: title, authorId: authorId)
+                }
+
+                public static func from(_ e: Post, now: Date) -> Self {
+                    Self(id: e.id, title: e.title, authorId: e.authorId, updatedAt: now)
+                }
+
+                /// Schema columns for auto-migration
+                public static var schemaColumns: [ColumnSchema] {
+                    [
+                        ColumnSchema(name: "id", type: "TEXT", notNull: true, primaryKey: true, defaultValue: nil),
+                        ColumnSchema(name: "title", type: "TEXT", notNull: true, primaryKey: false, defaultValue: nil),
+                        ColumnSchema(name: "authorId", type: "TEXT", notNull: true, primaryKey: false, defaultValue: nil),
+                        ColumnSchema(name: "updatedAt", type: "DATETIME", notNull: true, primaryKey: false, defaultValue: nil)
+                    ]
+                }
+
+                /// Creates the database table for this record type.
+                /// Call this from your migration: `try PostRecord.createTable(in: db)`
+                public static func createTable(in db: Database) throws {
+                    try db.create(table: databaseTableName) { t in
+                        t.column("id", .text).primaryKey()
+                        t.column("title", .text).notNull()
+                        t.column("authorId", .text).notNull()
+                        t.column("updatedAt", .datetime).notNull()
+                    }
+                }
+            }
+
+            extension Post: RegisteredEntity {
+                public typealias Record = PostRecord
+            }
+            """,
+            macros: testMacros
+        )
+        #else
+        throw XCTSkip("macros are only supported when running tests for the host platform")
+        #endif
+    }
+
+    func testStorageEntityWithJSONEncoded() throws {
+        #if canImport(StorageKitMacrosPlugin)
+        // Test that @StorageJSON properties are stored as TEXT with JSON encoding
+        assertMacroExpansion(
+            """
+            @StorageEntity(table: "products")
+            struct Product {
+                var id: String
+                var name: String
+
+                @StorageJSON
+                var attributes: [String: String]
+            }
+            """,
+            expandedSource: """
+            struct Product {
+                var id: String
+                var name: String
+                var attributes: [String: String]
+            }
+
+            public struct ProductRecord: StorageKitEntityRecord, Codable {
+                public typealias E = Product
+                public static let databaseTableName = "products"
+
+                public var id: String
+                public var name: String
+                public var attributes: String
+                public var updatedAt: Date
+
+                public init(id: String, name: String, attributes: String, updatedAt: Date) {
+                    self.id = id;
+                    self.name = name;
+                    self.attributes = attributes;
+                    self.updatedAt = updatedAt
+                }
+
+                public func asEntity() -> Product {
+                    Product(id: id, name: name, attributes: try! JSONDecoder().decode([String: String].self, from: attributes.data(using: .utf8)!))
+                }
+
+                public static func from(_ e: Product, now: Date) -> Self {
+                    Self(id: e.id, name: e.name, attributes: String(data: try! JSONEncoder().encode(e.attributes), encoding: .utf8)!, updatedAt: now)
+                }
+
+                /// Schema columns for auto-migration
+                public static var schemaColumns: [ColumnSchema] {
+                    [
+                        ColumnSchema(name: "id", type: "TEXT", notNull: true, primaryKey: true, defaultValue: nil),
+                        ColumnSchema(name: "name", type: "TEXT", notNull: true, primaryKey: false, defaultValue: nil),
+                        ColumnSchema(name: "attributes", type: "TEXT", notNull: true, primaryKey: false, defaultValue: nil),
+                        ColumnSchema(name: "updatedAt", type: "DATETIME", notNull: true, primaryKey: false, defaultValue: nil)
+                    ]
+                }
+
+                /// Creates the database table for this record type.
+                /// Call this from your migration: `try ProductRecord.createTable(in: db)`
+                public static func createTable(in db: Database) throws {
+                    try db.create(table: databaseTableName) { t in
+                        t.column("id", .text).primaryKey()
+                        t.column("name", .text).notNull()
+                        t.column("attributes", .text).notNull()
+                        t.column("updatedAt", .datetime).notNull()
+                    }
+                }
+            }
+
+            extension Product: RegisteredEntity {
+                public typealias Record = ProductRecord
             }
             """,
             macros: testMacros

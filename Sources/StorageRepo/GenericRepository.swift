@@ -47,24 +47,24 @@ public struct GenericRepository<E: StorageKitEntity, R: StorageKitEntityRecord>:
     // MARK: - Observation
 
     /// UI-friendly observation: values are delivered on MainActor.
-    public func observe(id: String) async -> AsyncStream<E?> {
-        await db.streamOnMainActor(bufferingPolicy: .bufferingNewest(1)) { db in
+    public func observe(id: String) -> AsyncStream<E?> {
+        db.streamOnMainActor(bufferingPolicy: .bufferingNewest(1)) { db in
             try R.fetchOne(db, key: id)?.asEntity()
         }
     }
 
-    /// Live stream of all entities (MainActor)
+    /// Live stream of all entities (MainActor delivery).
     public func observeAll(orderBy: String? = nil,
-                           ascending: Bool = true) async -> AsyncStream<[E]> {
-        await db.streamOnMainActor(bufferingPolicy: .bufferingNewest(1)) { db in
+                           ascending: Bool = true) -> AsyncStream<[E]> {
+        db.streamOnMainActor(bufferingPolicy: .bufferingNewest(1)) { db in
             try Self.fetchOrdered(db: db, orderBy: orderBy, ascending: ascending)
         }
     }
 
     /// Distinct stream (Equatable) to reduce UI redraws.
     public func observeAllDistinct(orderBy: String? = nil,
-                                   ascending: Bool = true) async -> AsyncStream<[E]> where E: Equatable {
-        await db.streamDistinctOnMainActor(bufferingPolicy: .bufferingNewest(1)) { db in
+                                   ascending: Bool = true) -> AsyncStream<[E]> where E: Equatable {
+        db.streamDistinctOnMainActor(bufferingPolicy: .bufferingNewest(1)) { db in
             try Self.fetchOrdered(db: db, orderBy: orderBy, ascending: ascending)
         }
     }
@@ -76,6 +76,24 @@ public struct GenericRepository<E: StorageKitEntity, R: StorageKitEntityRecord>:
                        ascending: Bool = true) async throws -> [E] {
         try await db.read { db in
             try Self.fetchOrdered(db: db, orderBy: orderBy, ascending: ascending)
+        }
+    }
+
+    /// Fetch entities filtered by column value
+    public func getAll(
+        where column: String,
+        equals value: String,
+        orderBy: String? = nil,
+        ascending: Bool = true
+    ) async throws -> [E] {
+        try await db.read { db in
+            let col = orderBy ?? "id"
+            let order = ascending ? Column(col).asc : Column(col).desc
+            return try R
+                .filter(Column(column) == value)
+                .order(order)
+                .fetchAll(db)
+                .map { $0.asEntity() }
         }
     }
 
@@ -128,47 +146,64 @@ public struct AnyRepository<E: StorageKitEntity>: Sendable {
     private let _get:        @Sendable (String) async throws -> E?
     private let _put:        @Sendable (E) async throws -> Void
     private let _delete:     @Sendable (String) async throws -> Void
-    private let _observe:    @Sendable (String) async -> AsyncStream<E?>
+    private let _observe:    @Sendable (String) -> AsyncStream<E?>
     private let _getAll:     @Sendable (String?, Bool, Int?, Int) async throws -> [E]
-    private let _observeAll: @Sendable (String?, Bool) async -> AsyncStream<[E]>
+    private let _getAllFiltered: @Sendable (String, String, String?, Bool) async throws -> [E]
+    private let _observeAll: @Sendable (String?, Bool) -> AsyncStream<[E]>
     private let _countAll:   @Sendable () async throws -> Int
     private let _getPage:    @Sendable (String?, Bool, Int, Int) async throws -> RepoPage<E>
-    private let _observeAllDistinct: @Sendable (String?, Bool) async -> AsyncStream<[E]>
+    private let _observeAllDistinct: @Sendable (String?, Bool) -> AsyncStream<[E]>
 
     public init<R: StorageKitEntityRecord>(_ repo: GenericRepository<E, R>) where R.E == E {
         _get        = { id in try await repo.get(id: id) }
         _put        = { e in try await repo.put(e) }
         _delete     = { id in try await repo.delete(id: id) }
-        _observe    = { id in await repo.observe(id: id) }
+        _observe    = { id in repo.observe(id: id) }
         _getAll     = { col, asc, lim, off in try await repo.getAll(orderBy: col, ascending: asc, limit: lim, offset: off) }
-        _observeAll = { col, asc in await repo.observeAll(orderBy: col, ascending: asc) }
+        _getAllFiltered = { col, val, ord, asc in try await repo.getAll(where: col, equals: val, orderBy: ord, ascending: asc) }
+        _observeAll = { col, asc in repo.observeAll(orderBy: col, ascending: asc) }
         _countAll   = { try await repo.countAll() }
         _getPage    = { col, asc, lim, off in try await repo.getPage(orderBy: col, ascending: asc, limit: lim, offset: off) }
-        _observeAllDistinct = { col, asc in await repo.observeAllDistinct(orderBy: col, ascending: asc) }
+        _observeAllDistinct = { col, asc in repo.observeAllDistinct(orderBy: col, ascending: asc) }
     }
 
-    // single
+    // MARK: - Single Entity
+
     public func get(id: String) async throws -> E? { try await _get(id) }
     public func put(_ entity: E) async throws { try await _put(entity) }
     public func delete(id: String) async throws { try await _delete(id) }
-    public func observe(id: String) async -> AsyncStream<E?> { await _observe(id) }
+    public func observe(id: String) -> AsyncStream<E?> { _observe(id) }
 
-    // many
+    // MARK: - Multiple Entities
+
     public func getAll(orderBy: String? = nil,
                        ascending: Bool = true,
                        limit: Int? = nil,
                        offset: Int = 0) async throws -> [E] {
         try await _getAll(orderBy, ascending, limit, offset)
     }
+
+    public func getAll(
+        where column: String,
+        equals value: String,
+        orderBy: String? = nil,
+        ascending: Bool = true
+    ) async throws -> [E] {
+        try await _getAllFiltered(column, value, orderBy, ascending)
+    }
+
     public func observeAll(orderBy: String? = nil,
-                           ascending: Bool = true) async -> AsyncStream<[E]> {
-        await _observeAll(orderBy, ascending)
+                           ascending: Bool = true) -> AsyncStream<[E]> {
+        _observeAll(orderBy, ascending)
     }
+
     public func observeAllDistinct(orderBy: String? = nil,
-                                   ascending: Bool = true) async -> AsyncStream<[E]> {
-        await _observeAllDistinct(orderBy, ascending)
+                                   ascending: Bool = true) -> AsyncStream<[E]> {
+        _observeAllDistinct(orderBy, ascending)
     }
+
     public func countAll() async throws -> Int { try await _countAll() }
+
     public func getPage(orderBy: String? = nil,
                         ascending: Bool = true,
                         limit: Int,

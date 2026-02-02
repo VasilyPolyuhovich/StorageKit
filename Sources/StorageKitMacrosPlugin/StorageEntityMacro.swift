@@ -51,8 +51,16 @@ public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
                 continue
             }
 
+            // Skip @HasMany and @BelongsTo properties (relationship markers, not stored columns)
+            if hasRelationAttribute(varDecl.attributes) {
+                continue
+            }
+
             // Check for @Embedded attribute
             let embeddedInfo = extractEmbeddedInfo(from: varDecl.attributes)
+
+            // Check for @JSONEncoded attribute
+            let isJSONEncoded = hasJSONEncodedAttribute(varDecl.attributes)
 
             for binding in varDecl.bindings {
                 guard let identifier = binding.pattern.as(IdentifierPatternSyntax.self),
@@ -81,11 +89,25 @@ public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
                         properties.append(PropertyInfo(name: propName, type: typeName, embedded: nil))
                     }
                 } else {
-                    properties.append(PropertyInfo(name: propName, type: typeName, embedded: nil))
+                    properties.append(PropertyInfo(name: propName, type: typeName, embedded: nil, isJSONEncoded: isJSONEncoded))
                 }
             }
         }
         return properties
+    }
+
+    /// Check if property has @StorageJSON attribute
+    private static func hasJSONEncodedAttribute(_ attributes: AttributeListSyntax) -> Bool {
+        for attr in attributes {
+            guard let attribute = attr.as(AttributeSyntax.self),
+                  let identifier = attribute.attributeName.as(IdentifierTypeSyntax.self) else {
+                continue
+            }
+            if identifier.name.text == "StorageJSON" {
+                return true
+            }
+        }
+        return false
     }
 
     /// Extract nested struct declarations and their properties
@@ -125,17 +147,32 @@ public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
         return result
     }
 
-    /// Extract @Embedded attribute info from property attributes
+    /// Check if property has @StorageHasMany or @StorageBelongsTo attribute (relationship markers)
+    private static func hasRelationAttribute(_ attributes: AttributeListSyntax) -> Bool {
+        for attr in attributes {
+            guard let attribute = attr.as(AttributeSyntax.self),
+                  let identifier = attribute.attributeName.as(IdentifierTypeSyntax.self) else {
+                continue
+            }
+            let name = identifier.name.text
+            if name == "StorageHasMany" || name == "StorageBelongsTo" {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Extract @StorageEmbedded attribute info from property attributes
     private static func extractEmbeddedInfo(from attributes: AttributeListSyntax) -> (prefix: String?, found: Bool)? {
         for attr in attributes {
             guard let attribute = attr.as(AttributeSyntax.self),
                   let identifier = attribute.attributeName.as(IdentifierTypeSyntax.self),
-                  identifier.name.text == "Embedded" else {
+                  identifier.name.text == "StorageEmbedded" else {
                 continue
             }
 
             // Extract prefix if specified
-            let prefix = EmbeddedMacro.extractPrefix(from: attribute)
+            let prefix = StorageEmbeddedMacro.extractPrefix(from: attribute)
             return (prefix: prefix, found: true)
         }
         return nil
@@ -198,17 +235,19 @@ public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
                         type: nestedProp.type,
                         sourcePath: "\(prop.name).\(nestedProp.name)",
                         embeddedIn: prop.name,
-                        nestedPropertyName: nestedProp.name
+                        nestedPropertyName: nestedProp.name,
+                        isJSONEncoded: false
                     ))
                 }
             } else {
-                // Regular property
+                // Regular property (may be JSON-encoded)
                 result.append(FlattenedProperty(
                     columnName: prop.name,
                     type: prop.type,
                     sourcePath: prop.name,
                     embeddedIn: nil,
-                    nestedPropertyName: nil
+                    nestedPropertyName: nil,
+                    isJSONEncoded: prop.isJSONEncoded
                 ))
             }
         }
@@ -239,24 +278,42 @@ public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
         flattenedProperties: [FlattenedProperty]
     ) throws -> DeclSyntax {
         // Build property declarations (flattened)
+        // For @JSONEncoded properties, store as String
         let propertyDecls = flattenedProperties.map { prop in
-            "public var \(prop.columnName): \(prop.type)"
+            if prop.isJSONEncoded {
+                return "public var \(prop.columnName): String"
+            } else {
+                return "public var \(prop.columnName): \(prop.type)"
+            }
         }.joined(separator: "\n    ")
 
         // Build entity initializer - reconstruct nested structs
         let entityInitArgs = generateEntityInitArgs(originalProperties: originalProperties, flattenedProperties: flattenedProperties)
 
         // Build record initializer arguments from entity - extract from nested structs
+        // For @JSONEncoded: encode to JSON string
         let recordInitArgs = flattenedProperties.map { prop in
-            "\(prop.columnName): e.\(prop.sourcePath)"
+            if prop.isJSONEncoded {
+                return "\(prop.columnName): String(data: try! JSONEncoder().encode(e.\(prop.sourcePath)), encoding: .utf8)!"
+            } else {
+                return "\(prop.columnName): e.\(prop.sourcePath)"
+            }
         }.joined(separator: ", ")
 
         // Build createTable column definitions
         let columnDefs = generateColumnDefinitions(flattenedProperties: flattenedProperties)
 
+        // Build schemaColumns for auto-migration
+        let schemaColumnsDefs = generateSchemaColumns(flattenedProperties: flattenedProperties)
+
         // Build memberwise initializer parameters
+        // For @JSONEncoded properties, use String type
         let initParams = flattenedProperties.map { prop in
-            "\(prop.columnName): \(prop.type)"
+            if prop.isJSONEncoded {
+                return "\(prop.columnName): String"
+            } else {
+                return "\(prop.columnName): \(prop.type)"
+            }
         }.joined(separator: ", ")
 
         let initAssignments = flattenedProperties.map { prop in
@@ -283,6 +340,14 @@ public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
                 Self(\(recordInitArgs), updatedAt: now)
             }
 
+            /// Schema columns for auto-migration
+            public static var schemaColumns: [ColumnSchema] {
+                [
+        \(schemaColumnsDefs)
+                    ColumnSchema(name: "updatedAt", type: "DATETIME", notNull: true, primaryKey: false, defaultValue: nil)
+                ]
+            }
+
             /// Creates the database table for this record type.
             /// Call this from your migration: `try \(recordName).createTable(in: db)`
             public static func createTable(in db: Database) throws {
@@ -302,7 +367,10 @@ public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
         originalProperties: [PropertyInfo],
         flattenedProperties: [FlattenedProperty]
     ) -> String {
-        originalProperties.map { prop in
+        // Create lookup for JSON-encoded properties
+        let jsonEncodedNames = Set(flattenedProperties.filter { $0.isJSONEncoded }.map { $0.columnName })
+
+        return originalProperties.map { prop in
             if let embedded = prop.embedded {
                 // Reconstruct nested struct from flattened columns
                 let nestedArgs = embedded.nestedProperties.map { nestedProp in
@@ -310,6 +378,9 @@ public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
                     return "\(nestedProp.name): \(columnName)"
                 }.joined(separator: ", ")
                 return "\(prop.name): \(prop.type)(\(nestedArgs))"
+            } else if jsonEncodedNames.contains(prop.name) {
+                // Decode JSON string back to original type
+                return "\(prop.name): try! JSONDecoder().decode(\(prop.type).self, from: \(prop.name).data(using: .utf8)!)"
             } else {
                 return "\(prop.name): \(prop.name)"
             }
@@ -322,7 +393,9 @@ public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
             let notNull = prop.columnName == "id" || !propInfo.isOptional
             let primaryKey = prop.columnName == "id"
 
-            var def = "            t.column(\"\(prop.columnName)\", \(propInfo.columnType))"
+            // For JSON-encoded properties, always use TEXT
+            let columnType = prop.isJSONEncoded ? ".text" : propInfo.columnType
+            var def = "            t.column(\"\(prop.columnName)\", \(columnType))"
 
             if primaryKey {
                 def += ".primaryKey()"
@@ -333,6 +406,18 @@ public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
             return def
         }.joined(separator: "\n")
     }
+
+    private static func generateSchemaColumns(flattenedProperties: [FlattenedProperty]) -> String {
+        flattenedProperties.map { prop in
+            let propInfo = PropertyInfo(name: prop.columnName, type: prop.type, embedded: nil)
+            let notNull = prop.columnName == "id" || !propInfo.isOptional
+            let primaryKey = prop.columnName == "id"
+
+            // For JSON-encoded properties, always use TEXT
+            let sqlType = prop.isJSONEncoded ? "TEXT" : propInfo.sqliteType
+            return "            ColumnSchema(name: \"\(prop.columnName)\", type: \"\(sqlType)\", notNull: \(notNull), primaryKey: \(primaryKey), defaultValue: nil),"
+        }.joined(separator: "\n")
+    }
 }
 
 // MARK: - Supporting Types
@@ -341,11 +426,13 @@ struct PropertyInfo {
     let name: String
     let type: String
     let embedded: EmbeddedPropertyInfo?
+    let isJSONEncoded: Bool
 
-    init(name: String, type: String, embedded: EmbeddedPropertyInfo? = nil) {
+    init(name: String, type: String, embedded: EmbeddedPropertyInfo? = nil, isJSONEncoded: Bool = false) {
         self.name = name
         self.type = type
         self.embedded = embedded
+        self.isJSONEncoded = isJSONEncoded
     }
 
     /// Check if type is optional (handles both `T?` and `Optional<T>` syntax)
@@ -384,6 +471,26 @@ struct PropertyInfo {
             return ".text"
         }
     }
+
+    /// Maps Swift type to SQLite type name for schema introspection
+    var sqliteType: String {
+        switch baseType {
+        case "String", "UUID", "URL":
+            return "TEXT"
+        case "Int", "Int64", "Int32", "Int16", "Int8", "UInt", "UInt64", "UInt32", "UInt16", "UInt8":
+            return "INTEGER"
+        case "Double", "Float", "CGFloat":
+            return "REAL"
+        case "Bool":
+            return "BOOLEAN"
+        case "Date":
+            return "DATETIME"
+        case "Data":
+            return "BLOB"
+        default:
+            return "TEXT"
+        }
+    }
 }
 
 struct EmbeddedPropertyInfo {
@@ -397,6 +504,7 @@ struct FlattenedProperty {
     let sourcePath: String  // e.g., "address.street" or just "name"
     let embeddedIn: String?  // Parent property name if embedded
     let nestedPropertyName: String?  // Property name within nested struct
+    let isJSONEncoded: Bool  // True if @JSONEncoded attribute is present
 }
 
 enum MacroError: Error, CustomStringConvertible {
@@ -414,7 +522,7 @@ enum MacroError: Error, CustomStringConvertible {
         case .noIdProperty:
             return "@StorageEntity requires an 'id' property"
         case .embeddedTypeNotFound(let type):
-            return "@Embedded type '\(type)' must be declared as a nested struct within the same entity"
+            return "@StorageEmbedded type '\(type)' must be declared as a nested struct within the same entity"
         }
     }
 }
@@ -423,6 +531,9 @@ enum MacroError: Error, CustomStringConvertible {
 struct StorageKitMacrosPlugin: CompilerPlugin {
     let providingMacros: [Macro.Type] = [
         StorageEntityMacro.self,
-        EmbeddedMacro.self,
+        StorageEmbeddedMacro.self,
+        StorageHasManyMacro.self,
+        StorageBelongsToMacro.self,
+        StorageJSONMacro.self,
     ]
 }
