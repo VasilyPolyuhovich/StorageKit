@@ -1,5 +1,6 @@
 # StorageKit — Swift 6 SQLite Storage for SwiftUI
 
+[![StorageKit 2.0.0](https://img.shields.io/badge/StorageKit-2.0.0-purple.svg)](https://github.com/nicklama/StorageKit)
 [![Swift 6](https://img.shields.io/badge/Swift-6.0-orange.svg)](https://swift.org)
 [![iOS 18+](https://img.shields.io/badge/iOS-18+-blue.svg)](https://developer.apple.com/ios/)
 [![GRDB 7.6.1](https://img.shields.io/badge/GRDB-7.6.1-green.svg)](https://github.com/groue/GRDB.swift)
