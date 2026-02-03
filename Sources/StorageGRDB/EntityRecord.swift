@@ -1,5 +1,5 @@
 import Foundation
-@preconcurrency import GRDB
+@_exported @preconcurrency import GRDB
 import StorageCore
 
 public protocol StorageKitEntityRecord: FetchableRecord, PersistableRecord, Sendable {

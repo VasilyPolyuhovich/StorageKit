@@ -111,6 +111,36 @@ public struct GenericRepository<E: StorageKitEntity, R: StorageKitEntityRecord>:
         try await db.read { db in try R.fetchCount(db) }
     }
 
+    // MARK: - Batch Operations
+
+    /// Save multiple entities in a single transaction (much faster than individual puts)
+    public func putAll(_ entities: [E]) async throws {
+        guard !entities.isEmpty else { return }
+        let now = cfg.clock.now
+        let records = entities.map { R.from($0, now: now) }
+        try await db.write { db in
+            for record in records {
+                try record.save(db)
+            }
+        }
+    }
+
+    /// Delete all entities matching column value
+    @discardableResult
+    public func deleteAll(where column: String, equals value: String) async throws -> Int {
+        try await db.write { db in
+            try R.filter(Column(column) == value).deleteAll(db)
+        }
+    }
+
+    /// Delete all entities of this type
+    @discardableResult
+    public func deleteAll() async throws -> Int {
+        try await db.write { db in
+            try R.deleteAll(db)
+        }
+    }
+
     // MARK: - Paging
 
     public func getPage(orderBy: String? = nil,
@@ -153,6 +183,9 @@ public struct AnyRepository<E: StorageKitEntity>: Sendable {
     private let _countAll:   @Sendable () async throws -> Int
     private let _getPage:    @Sendable (String?, Bool, Int, Int) async throws -> RepoPage<E>
     private let _observeAllDistinct: @Sendable (String?, Bool) -> AsyncStream<[E]>
+    private let _putAll:     @Sendable ([E]) async throws -> Void
+    private let _deleteAll:  @Sendable () async throws -> Int
+    private let _deleteAllWhere: @Sendable (String, String) async throws -> Int
 
     public init<R: StorageKitEntityRecord>(_ repo: GenericRepository<E, R>) where R.E == E {
         _get        = { id in try await repo.get(id: id) }
@@ -165,6 +198,9 @@ public struct AnyRepository<E: StorageKitEntity>: Sendable {
         _countAll   = { try await repo.countAll() }
         _getPage    = { col, asc, lim, off in try await repo.getPage(orderBy: col, ascending: asc, limit: lim, offset: off) }
         _observeAllDistinct = { col, asc in repo.observeAllDistinct(orderBy: col, ascending: asc) }
+        _putAll     = { entities in try await repo.putAll(entities) }
+        _deleteAll  = { try await repo.deleteAll() }
+        _deleteAllWhere = { col, val in try await repo.deleteAll(where: col, equals: val) }
     }
 
     // MARK: - Single Entity
@@ -209,5 +245,17 @@ public struct AnyRepository<E: StorageKitEntity>: Sendable {
                         limit: Int,
                         offset: Int = 0) async throws -> RepoPage<E> {
         try await _getPage(orderBy, ascending, limit, offset)
+    }
+
+    // MARK: - Batch Operations
+
+    public func putAll(_ entities: [E]) async throws { try await _putAll(entities) }
+
+    @discardableResult
+    public func deleteAll() async throws -> Int { try await _deleteAll() }
+
+    @discardableResult
+    public func deleteAll(where column: String, equals value: String) async throws -> Int {
+        try await _deleteAllWhere(column, value)
     }
 }

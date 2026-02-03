@@ -49,12 +49,10 @@ public final class Storage: Sendable {
         try await repo.put(entity)
     }
 
-    /// Save multiple entities to database
+    /// Save multiple entities to database (single transaction - much faster)
     public func save<E: RegisteredEntity>(_ entities: [E]) async throws {
         let repo = context.makeRepository(E.self, record: E.Record.self)
-        for entity in entities {
-            try await repo.put(entity)
-        }
+        try await repo.putAll(entities)
     }
 
     // MARK: - Get
@@ -105,6 +103,24 @@ public final class Storage: Sendable {
     public func delete<E: RegisteredEntity>(_ entity: E) async throws {
         let repo = context.makeRepository(E.self, record: E.Record.self)
         try await repo.delete(id: "\(entity.id)")
+    }
+
+    /// Delete all entities of a type
+    @discardableResult
+    public func deleteAll<E: RegisteredEntity>(_ type: E.Type) async throws -> Int {
+        let repo = context.makeRepository(type, record: E.Record.self)
+        return try await repo.deleteAll()
+    }
+
+    /// Delete all entities matching a condition
+    @discardableResult
+    public func deleteAll<E: RegisteredEntity>(
+        _ type: E.Type,
+        where column: String,
+        equals value: String
+    ) async throws -> Int {
+        let repo = context.makeRepository(type, record: E.Record.self)
+        return try await repo.deleteAll(where: column, equals: value)
     }
 
     // MARK: - Observe
@@ -189,6 +205,88 @@ public final class Storage: Sendable {
     ) async throws -> [Child] {
         let repo = context.makeRepository(type, record: Child.Record.self)
         return try await repo.getAll(where: foreignKey, equals: parentId, orderBy: orderBy, ascending: ascending)
+    }
+
+    // MARK: - Full-Text Search
+
+    /// Full-text search using FTS5.
+    ///
+    /// Requires FTS5 virtual table created with `schema.addFullTextSearch()`.
+    ///
+    /// Usage:
+    /// ```swift
+    /// let results = try await storage.search(Article.self, query: "swift performance")
+    /// for result in results {
+    ///     print("\(result.entity.title) - rank: \(result.rank)")
+    /// }
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - type: Entity type to search
+    ///   - query: FTS5 query string (supports AND, OR, NOT, phrases)
+    ///   - limit: Maximum results to return
+    /// - Returns: Search results sorted by relevance (best matches first)
+    public func search<E: RegisteredEntity>(
+        _ type: E.Type,
+        query: String,
+        limit: Int = 50
+    ) async throws -> [SearchResult<E>] {
+        let mainTable = E.Record.databaseTableName
+        let ftsTable = "\(mainTable)_fts"
+
+        return try await context.storage.dbActor.read { db in
+            let sql = """
+                SELECT m.*, f.rank
+                FROM "\(ftsTable)" f
+                JOIN "\(mainTable)" m ON f.rowid = m.rowid
+                WHERE "\(ftsTable)" MATCH ?
+                ORDER BY f.rank
+                LIMIT ?
+            """
+            let rows = try Row.fetchAll(db, sql: sql, arguments: [query, limit])
+
+            return try rows.map { row in
+                let record = try E.Record(row: row)
+                let rank: Double = row["rank"]
+                return SearchResult(entity: record.asEntity(), rank: rank)
+            }
+        }
+    }
+
+    /// Full-text search with highlighted snippets.
+    ///
+    /// - Parameters:
+    ///   - type: Entity type to search
+    ///   - query: FTS5 query string
+    ///   - snippetColumn: Column index (0-based) for snippet extraction
+    ///   - limit: Maximum results to return
+    public func searchWithSnippets<E: RegisteredEntity>(
+        _ type: E.Type,
+        query: String,
+        snippetColumn: Int = 0,
+        limit: Int = 50
+    ) async throws -> [SearchResult<E>] {
+        let mainTable = E.Record.databaseTableName
+        let ftsTable = "\(mainTable)_fts"
+
+        return try await context.storage.dbActor.read { db in
+            let sql = """
+                SELECT m.*, f.rank, snippet("\(ftsTable)", \(snippetColumn), '<b>', '</b>', '...', 32) as snippet
+                FROM "\(ftsTable)" f
+                JOIN "\(mainTable)" m ON f.rowid = m.rowid
+                WHERE "\(ftsTable)" MATCH ?
+                ORDER BY f.rank
+                LIMIT ?
+            """
+            let rows = try Row.fetchAll(db, sql: sql, arguments: [query, limit])
+
+            return try rows.map { row in
+                let record = try E.Record(row: row)
+                let rank: Double = row["rank"]
+                let snippet: String? = row["snippet"]
+                return SearchResult(entity: record.asEntity(), rank: rank, snippet: snippet)
+            }
+        }
     }
 
     // MARK: - Repository Access

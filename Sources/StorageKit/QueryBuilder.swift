@@ -335,7 +335,26 @@ public struct Query<E: RegisteredEntity>: Sendable {
         }
     }
 
+    /// Delete all matching entities
+    @discardableResult
+    public func deleteAll() async throws -> Int {
+        try await db.write { db in
+            try self.buildDeleteRequest().deleteAll(db)
+        }
+    }
+
     // MARK: - Private
+
+    private func buildDeleteRequest() -> QueryInterfaceRequest<E.Record> {
+        var request = E.Record.all()
+
+        // Apply predicates only (ignore order/limit for delete)
+        for predicate in predicates {
+            request = request.filter(sql: predicate.sql, arguments: StatementArguments(predicate.arguments))
+        }
+
+        return request
+    }
 
     private func buildRequest() -> QueryInterfaceRequest<E.Record> {
         var request = E.Record.all()

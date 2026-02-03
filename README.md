@@ -144,6 +144,20 @@ let posts = try await storage.loadChildren(
 let author = try await storage.loadParent(Author.self, id: post.authorId)
 ```
 
+**GRDB Associations (Advanced):**
+
+The `@StorageHasMany` and `@StorageBelongsTo` macros automatically generate native GRDB associations on the Record type, enabling JOINs and eager loading:
+
+```swift
+// Access the typed repository for GRDB-level queries
+let repo = storage.repository(Author.self)
+
+// The generated AuthorRecord has:
+//   static let posts = hasMany(PostRecord.self, using: ForeignKey(["authorId"]))
+// The generated PostRecord has:
+//   static let author = belongsTo(AuthorRecord.self, using: ForeignKey(["authorId"]))
+```
+
 ### Type-Safe Queries with QueryBuilder
 
 Replace string-based queries with compile-time checked predicates:
@@ -511,6 +525,76 @@ let context = try StorageKit.start { schema in
 }
 ```
 
+### Batch Operations
+
+Efficient bulk operations in single transaction:
+
+```swift
+// Save many entities at once (100x faster than loop)
+let users = (1...1000).map { User(id: "\($0)", name: "User \($0)") }
+try await storage.save(users)  // Single transaction
+
+// Delete all entities of a type
+try await storage.deleteAll(User.self)
+
+// Delete with condition
+try await storage.deleteAll(User.self, where: "status", equals: "inactive")
+
+// Delete via query builder
+try await storage.query(User.self)
+    .where { $0.lastLogin < thirtyDaysAgo }
+    .deleteAll()
+```
+
+### Full-Text Search (FTS5)
+
+Fast text search with SQLite FTS5:
+
+```swift
+// 1. Define entity
+@StorageEntity
+struct Article {
+    var id: String
+    var title: String
+    var content: String
+}
+
+// 2. Setup with FTS
+let context = try StorageKit.start { schema in
+    schema.addKVCache()
+    schema.autoSchema(ArticleRecord.self)
+
+    // Add full-text search on title and content
+    schema.addFullTextSearch(
+        table: "articles",
+        columns: ["title", "content"]
+    )
+}
+
+// 3. Search
+let results = try await storage.search(Article.self, query: "swift performance")
+for result in results {
+    print("\(result.entity.title) - rank: \(result.rank)")
+}
+
+// Search with highlighted snippets
+let results = try await storage.searchWithSnippets(
+    Article.self,
+    query: "swift",
+    snippetColumn: 1  // content column
+)
+for result in results {
+    print(result.snippet ?? "")  // "...using <b>Swift</b> for..."
+}
+```
+
+**FTS5 Query Syntax:**
+- Simple: `"swift"` — matches "swift" anywhere
+- Phrase: `"\"swift programming\""` — exact phrase
+- Boolean: `"swift AND performance"`, `"swift OR kotlin"`
+- Prefix: `"swi*"` — matches "swift", "swim", etc.
+- Column: `"title:swift"` — search only in title
+
 ---
 
 ## API Reference
@@ -559,8 +643,8 @@ public struct Query<E: RegisteredEntity> {
 |-------|---------|
 | `@StorageEntity` | Generates Record type and persistence code |
 | `@StorageEmbedded(prefix:)` | Flattens nested struct into parent table |
-| `@StorageHasMany(foreignKey:)` | Marks one-to-many relation (not persisted) |
-| `@StorageBelongsTo` | Marks many-to-one relation (not persisted) |
+| `@StorageHasMany(foreignKey:)` | One-to-many relation; generates `hasMany()` GRDB association |
+| `@StorageBelongsTo` | Many-to-one relation; generates `belongsTo()` GRDB association |
 | `@StorageJSON` | Stores property as JSON TEXT |
 
 ---

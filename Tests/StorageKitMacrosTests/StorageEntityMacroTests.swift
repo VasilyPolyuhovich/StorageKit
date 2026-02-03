@@ -447,7 +447,8 @@ final class StorageEntityMacroTests: XCTestCase {
 
     func testStorageEntityWithRelations() throws {
         #if canImport(StorageKitMacrosPlugin)
-        // Test that @StorageHasMany and @StorageBelongsTo properties are skipped in Record generation
+        // Test that @StorageHasMany and @StorageBelongsTo properties are skipped in Record
+        // AND that GRDB associations are generated
         assertMacroExpansion(
             """
             @StorageEntity(table: "posts")
@@ -516,10 +517,97 @@ final class StorageEntityMacroTests: XCTestCase {
                         t.column("updatedAt", .datetime).notNull()
                     }
                 }
+
+                // MARK: - Associations
+                public static let author = belongsTo(UserRecord.self, using: ForeignKey(["authorId"]))
+                public static let comments = hasMany(CommentRecord.self, using: ForeignKey(["postId"]))
             }
 
             extension Post: RegisteredEntity {
                 public typealias Record = PostRecord
+            }
+            """,
+            macros: testMacros
+        )
+        #else
+        throw XCTSkip("macros are only supported when running tests for the host platform")
+        #endif
+    }
+
+    func testStorageEntityWithExplicitBelongsToForeignKey() throws {
+        #if canImport(StorageKitMacrosPlugin)
+        // Test @StorageBelongsTo with explicit foreignKey parameter
+        assertMacroExpansion(
+            """
+            @StorageEntity(table: "comments")
+            struct Comment {
+                var id: String
+                var text: String
+                var postId: String
+
+                @StorageBelongsTo(foreignKey: "postId")
+                var post: Post?
+            }
+            """,
+            expandedSource: """
+            struct Comment {
+                var id: String
+                var text: String
+                var postId: String
+                var post: Post?
+            }
+
+            public struct CommentRecord: StorageKitEntityRecord, Codable {
+                public typealias E = Comment
+                public static let databaseTableName = "comments"
+
+                public var id: String
+                public var text: String
+                public var postId: String
+                public var updatedAt: Date
+
+                public init(id: String, text: String, postId: String, updatedAt: Date) {
+                    self.id = id;
+                    self.text = text;
+                    self.postId = postId;
+                    self.updatedAt = updatedAt
+                }
+
+                public func asEntity() -> Comment {
+                    Comment(id: id, text: text, postId: postId)
+                }
+
+                public static func from(_ e: Comment, now: Date) -> Self {
+                    Self(id: e.id, text: e.text, postId: e.postId, updatedAt: now)
+                }
+
+                /// Schema columns for auto-migration
+                public static var schemaColumns: [ColumnSchema] {
+                    [
+                        ColumnSchema(name: "id", type: "TEXT", notNull: true, primaryKey: true, defaultValue: nil),
+                        ColumnSchema(name: "text", type: "TEXT", notNull: true, primaryKey: false, defaultValue: nil),
+                        ColumnSchema(name: "postId", type: "TEXT", notNull: true, primaryKey: false, defaultValue: nil),
+                        ColumnSchema(name: "updatedAt", type: "DATETIME", notNull: true, primaryKey: false, defaultValue: nil)
+                    ]
+                }
+
+                /// Creates the database table for this record type.
+                /// Call this from your migration: `try CommentRecord.createTable(in: db)`
+                public static func createTable(in db: Database) throws {
+                    try db.create(table: databaseTableName) { t in
+                        t.column("id", .text).primaryKey()
+                        t.column("text", .text).notNull()
+                        t.column("postId", .text).notNull()
+                        t.column("updatedAt", .datetime).notNull()
+                    }
+                }
+
+                // MARK: - Associations
+                public static let post = belongsTo(PostRecord.self, using: ForeignKey(["postId"]))
+            }
+
+            extension Comment: RegisteredEntity {
+                public typealias Record = CommentRecord
             }
             """,
             macros: testMacros

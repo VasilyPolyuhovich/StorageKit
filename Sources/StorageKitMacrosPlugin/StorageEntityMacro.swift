@@ -162,6 +162,76 @@ public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
         return false
     }
 
+    /// Extract GRDB association metadata from @StorageHasMany / @StorageBelongsTo properties
+    private static func extractRelations(from structDecl: StructDeclSyntax) -> [RelationInfo] {
+        var relations: [RelationInfo] = []
+
+        for member in structDecl.memberBlock.members {
+            guard let varDecl = member.decl.as(VariableDeclSyntax.self) else { continue }
+
+            for attr in varDecl.attributes {
+                guard let attribute = attr.as(AttributeSyntax.self),
+                      let identifier = attribute.attributeName.as(IdentifierTypeSyntax.self) else {
+                    continue
+                }
+
+                guard let binding = varDecl.bindings.first,
+                      let identPattern = binding.pattern.as(IdentifierPatternSyntax.self),
+                      let typeAnnotation = binding.typeAnnotation else {
+                    continue
+                }
+
+                let propName = identPattern.identifier.text
+                let typeName = typeAnnotation.type.trimmedDescription
+
+                if identifier.name.text == "StorageHasMany" {
+                    let elementType = extractArrayElementType(typeName)
+                    guard let foreignKey = StorageHasManyMacro.extractForeignKey(from: attribute) else { continue }
+
+                    relations.append(RelationInfo(
+                        kind: .hasMany,
+                        propertyName: propName,
+                        relatedTypeName: elementType,
+                        foreignKey: foreignKey
+                    ))
+                } else if identifier.name.text == "StorageBelongsTo" {
+                    let baseType = extractOptionalBaseType(typeName) ?? typeName
+                    let foreignKey = StorageBelongsToMacro.extractForeignKey(from: attribute) ?? (propName + "Id")
+
+                    relations.append(RelationInfo(
+                        kind: .belongsTo,
+                        propertyName: propName,
+                        relatedTypeName: baseType,
+                        foreignKey: foreignKey
+                    ))
+                }
+            }
+        }
+        return relations
+    }
+
+    /// Extract element type from array type syntax: "[Post]" → "Post", "Array<Post>" → "Post"
+    private static func extractArrayElementType(_ typeName: String) -> String {
+        if typeName.hasPrefix("[") && typeName.hasSuffix("]") {
+            return String(typeName.dropFirst().dropLast())
+        }
+        if typeName.hasPrefix("Array<") && typeName.hasSuffix(">") {
+            return String(typeName.dropFirst(6).dropLast())
+        }
+        return typeName
+    }
+
+    /// Extract base type from optional: "User?" → "User", "Optional<User>" → "User"
+    private static func extractOptionalBaseType(_ typeName: String) -> String? {
+        if typeName.hasSuffix("?") {
+            return String(typeName.dropLast())
+        }
+        if typeName.hasPrefix("Optional<") && typeName.hasSuffix(">") {
+            return String(typeName.dropFirst(9).dropLast())
+        }
+        return nil
+    }
+
     /// Extract @StorageEmbedded attribute info from property attributes
     private static func extractEmbeddedInfo(from attributes: AttributeListSyntax) -> (prefix: String?, found: Bool)? {
         for attr in attributes {
@@ -210,13 +280,17 @@ public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
         // Flatten properties for Record generation
         let flattenedProperties = flattenProperties(properties)
 
+        // Extract relation metadata for GRDB associations
+        let relations = extractRelations(from: structDecl)
+
         // Generate record struct
         let recordDecl = try generateRecordDecl(
             recordName: recordName,
             entityName: structName,
             tableName: tableName,
             originalProperties: properties,
-            flattenedProperties: flattenedProperties
+            flattenedProperties: flattenedProperties,
+            relations: relations
         )
 
         return [recordDecl]
@@ -275,7 +349,8 @@ public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
         entityName: String,
         tableName: String,
         originalProperties: [PropertyInfo],
-        flattenedProperties: [FlattenedProperty]
+        flattenedProperties: [FlattenedProperty],
+        relations: [RelationInfo] = []
     ) throws -> DeclSyntax {
         // Build property declarations (flattened)
         // For @JSONEncoded properties, store as String
@@ -320,6 +395,19 @@ public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
             "self.\(prop.columnName) = \(prop.columnName)"
         }.joined(separator: "; ")
 
+        // Generate GRDB association declarations
+        let associationDecls = relations.map { rel in
+            let relatedRecord = "\(rel.relatedTypeName)Record"
+            switch rel.kind {
+            case .hasMany:
+                return "public static let \(rel.propertyName) = hasMany(\(relatedRecord).self, using: ForeignKey([\"\(rel.foreignKey)\"]))"
+            case .belongsTo:
+                return "public static let \(rel.propertyName) = belongsTo(\(relatedRecord).self, using: ForeignKey([\"\(rel.foreignKey)\"]))"
+            }
+        }
+
+        let associationBlock = associationDecls.isEmpty ? "" : "\n\n    // MARK: - Associations\n    " + associationDecls.joined(separator: "\n    ")
+
         let code = """
         public struct \(recordName): StorageKitEntityRecord, Codable {
             public typealias E = \(entityName)
@@ -355,7 +443,7 @@ public struct StorageEntityMacro: ExtensionMacro, PeerMacro {
         \(columnDefs)
                     t.column("updatedAt", .datetime).notNull()
                 }
-            }
+            }\(associationBlock)
         }
         """
 
@@ -505,6 +593,14 @@ struct FlattenedProperty {
     let embeddedIn: String?  // Parent property name if embedded
     let nestedPropertyName: String?  // Property name within nested struct
     let isJSONEncoded: Bool  // True if @JSONEncoded attribute is present
+}
+
+struct RelationInfo {
+    enum Kind { case hasMany, belongsTo }
+    let kind: Kind
+    let propertyName: String
+    let relatedTypeName: String  // e.g., "Post" (without [] or ?)
+    let foreignKey: String
 }
 
 enum MacroError: Error, CustomStringConvertible {

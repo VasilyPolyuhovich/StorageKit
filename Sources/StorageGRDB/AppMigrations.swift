@@ -99,6 +99,83 @@ public struct AppMigrations {
         return self
     }
 
+    // MARK: - Full-Text Search
+
+    /// Add Full-Text Search (FTS5) for a table.
+    ///
+    /// Creates an FTS5 virtual table with auto-sync triggers.
+    /// The FTS table uses external content mode (no data duplication).
+    ///
+    /// Example:
+    /// ```swift
+    /// schema.autoSchema(ArticleRecord.self)
+    /// schema.addFullTextSearch(
+    ///     table: "articles",
+    ///     columns: ["title", "content"]
+    /// )
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - table: Source table name (must exist before FTS)
+    ///   - columns: Columns to index for search
+    ///   - tokenizer: FTS5 tokenizer (default: "porter" for stemming)
+    @discardableResult
+    public mutating func addFullTextSearch(
+        table: String,
+        columns: [String],
+        tokenizer: String = "porter"
+    ) -> Self {
+        let ftsTable = "\(table)_fts"
+        let columnList = columns.joined(separator: ", ")
+        let newColumnList = columns.map { "new.\($0)" }.joined(separator: ", ")
+        let oldColumnList = columns.map { "old.\($0)" }.joined(separator: ", ")
+
+        migration("fts5_\(table)", skipIfTableExists: ftsTable) { db in
+            // Create FTS5 virtual table with external content
+            try db.execute(sql: """
+                CREATE VIRTUAL TABLE "\(ftsTable)" USING fts5(
+                    \(columnList),
+                    content='\(table)',
+                    content_rowid='rowid',
+                    tokenize='\(tokenizer)'
+                )
+            """)
+
+            // Populate FTS from existing data
+            try db.execute(sql: """
+                INSERT INTO "\(ftsTable)"("\(ftsTable)", rowid, \(columnList))
+                SELECT 'rebuild', rowid, \(columnList) FROM "\(table)"
+            """)
+
+            // Sync trigger: INSERT
+            try db.execute(sql: """
+                CREATE TRIGGER "\(table)_fts_ai" AFTER INSERT ON "\(table)" BEGIN
+                    INSERT INTO "\(ftsTable)"(rowid, \(columnList))
+                    VALUES (new.rowid, \(newColumnList));
+                END
+            """)
+
+            // Sync trigger: DELETE
+            try db.execute(sql: """
+                CREATE TRIGGER "\(table)_fts_ad" AFTER DELETE ON "\(table)" BEGIN
+                    INSERT INTO "\(ftsTable)"("\(ftsTable)", rowid, \(columnList))
+                    VALUES ('delete', old.rowid, \(oldColumnList));
+                END
+            """)
+
+            // Sync trigger: UPDATE
+            try db.execute(sql: """
+                CREATE TRIGGER "\(table)_fts_au" AFTER UPDATE ON "\(table)" BEGIN
+                    INSERT INTO "\(ftsTable)"("\(ftsTable)", rowid, \(columnList))
+                    VALUES ('delete', old.rowid, \(oldColumnList));
+                    INSERT INTO "\(ftsTable)"(rowid, \(columnList))
+                    VALUES (new.rowid, \(newColumnList));
+                END
+            """)
+        }
+        return self
+    }
+
     // MARK: - Manual Migrations
 
     /// Add a custom migration for complex operations.
